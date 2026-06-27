@@ -1,62 +1,76 @@
-'use client'
-
-import React from 'react'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import InspectorPanel from '@/components/panels/InspectorPanel'
-import { useLayoutStore } from '@/lib/layout/store'
-import BottomPanel from './BottomPanel'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { useMcapStore } from '@/stores/mcap'
+import BottomArea from './BottomArea'
 import DockArea from './DockArea'
-import TitleBar from './TitleBar'
+import NavBar from './NavBar'
+import OverviewArea from './OverviewArea'
 
 export default function AppShell() {
-  const bottomPanelOpen = useLayoutStore(state => state.bottomPanelOpen)
-  const bottomPanelSize = useLayoutStore(state => state.bottomPanelSize)
-  const setBottomPanelSize = useLayoutStore(state => state.setBottomPanelSize)
+  const loading = useMcapStore(state => state.loading)
+  const loadingProgress = useMcapStore(state => state.loadingProgress)
 
-  const handleVerticalLayout = (sizes: number[]) => {
-    if (sizes.length > 1) {
-      setBottomPanelSize(sizes[1])
-    }
-  }
+  const loadingPercent = loadingProgress
+    ? Math.min(100, Math.round((loadingProgress.loaded / loadingProgress.total) * 100))
+    : 0
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-workbench text-text-main font-sans select-none">
-      {/* Title Bar */}
-      <TitleBar />
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-workbench text-text-main font-sans select-none relative">
+      {/* Loading Progress Indicator Overlay */}
+      {loading && (
+        <div className="absolute inset-0 bg-[#000000]/60 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 px-12">
+          <div className="w-10 h-10 rounded-full border-2 border-layout-primary border-t-transparent animate-spin"></div>
+          <div className="text-center w-64 max-w-xs space-y-3 font-mono">
+            <p className="text-[11px] font-bold tracking-wider text-layout-primary uppercase">Parsing MCAP Datastream</p>
+            <div className="w-full bg-layout-border h-1 rounded-full overflow-hidden">
+              <div
+                className="bg-layout-primary h-full transition-all duration-300"
+                style={{ width: `${loadingPercent}%` }}
+              />
+            </div>
+            {loadingProgress && (
+              <p className="text-[9px] text-text-secondary">
+                Parsed:
+                {' '}
+                {loadingProgress.loaded.toLocaleString()}
+                {' '}
+                /
+                {' '}
+                {loadingProgress.total.toLocaleString()}
+                {' '}
+                messages (
+                {loadingPercent}
+                %)
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Nav Bar */}
+      <NavBar />
 
       {/* Main Body */}
       <div className="flex-1 flex min-h-0 relative overflow-hidden">
         {/* Main Side: Workspace (Dock + Bottom Panel) */}
         <main className="flex-1 h-full min-w-0 relative overflow-hidden flex flex-col">
-          <PanelGroup direction="vertical" onLayout={handleVerticalLayout}>
-            <Panel minSize={20}>
-              <PanelGroup direction="horizontal">
-                <Panel defaultSize={25} minSize={10} maxSize={33}>
-                  <div className="w-full h-full flex flex-col bg-panel border-r border-layout-border">
-                    <div className="h-[34px] bg-titlebar border-b border-layout-border px-3 flex items-center justify-between text-xs select-none shrink-0 font-sans">
-                      <span className="font-semibold text-[11px]">Overview</span>
-                    </div>
-                    <div className="flex-1 min-h-0 overflow-hidden">
-                      <InspectorPanel />
-                    </div>
-                  </div>
-                </Panel>
-                <PanelResizeHandle />
-                <Panel minSize={67}>
+          <ResizablePanelGroup orientation="vertical">
+            <ResizablePanel minSize="20%" id="main-content">
+              <ResizablePanelGroup orientation="horizontal">
+                <ResizablePanel defaultSize="25%" minSize="10%" maxSize="33%" id="sidebar-panel">
+                  <OverviewArea />
+                </ResizablePanel>
+                <ResizableHandle />
+                <ResizablePanel minSize="67%" id="dock-panel">
                   <DockArea />
-                </Panel>
-              </PanelGroup>
-            </Panel>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </ResizablePanel>
 
-            {bottomPanelOpen && (
-              <>
-                <PanelResizeHandle />
-                <Panel defaultSize={bottomPanelSize} minSize={5} maxSize={25}>
-                  <BottomPanel />
-                </Panel>
-              </>
-            )}
-          </PanelGroup>
+            <ResizableHandle />
+            <ResizablePanel defaultSize="25%" minSize="5%" maxSize="25%" id="bottom-panel">
+              <BottomArea />
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </main>
       </div>
     </div>

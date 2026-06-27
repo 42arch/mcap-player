@@ -1,28 +1,26 @@
-'use client'
-
-import { MapPin, Minus, NavigationArrow, Plus, Target } from '@phosphor-icons/react'
-import React from 'react'
+import { MapPinIcon, MinusIcon, NavigationArrowIcon, PlusIcon, TargetIcon } from '@phosphor-icons/react'
+import { Button } from '@/components/ui/button'
 
 export default function MapPanel() {
   return (
     <div className="w-full h-full bg-panel text-text-main flex flex-col font-mono text-xs overflow-hidden relative select-none">
       {/* Map Control Bar */}
       <div className="absolute top-2 left-2 flex gap-1 z-10">
-        <button className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover p-1.5 rounded-[2px]" title="Center on Robot">
-          <Target size={13} />
-        </button>
-        <button className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover p-1.5 rounded-[2px]" title="Add Waypoint">
-          <MapPin size={13} />
-        </button>
+        <Button variant="outline" size="icon-xs" className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover cursor-pointer" title="Center on Robot">
+          <TargetIcon size={13} />
+        </Button>
+        <Button variant="outline" size="icon-xs" className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover cursor-pointer" title="Add Waypoint">
+          <MapPinIcon size={13} />
+        </Button>
       </div>
 
       <div className="absolute top-2 right-2 flex flex-col gap-1 z-10">
-        <button className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover p-1.5 rounded-[2px]">
-          <Plus size={13} />
-        </button>
-        <button className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover p-1.5 rounded-[2px]">
-          <Minus size={13} />
-        </button>
+        <Button variant="outline" size="icon-xs" className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover cursor-pointer">
+          <PlusIcon size={13} />
+        </Button>
+        <Button variant="outline" size="icon-xs" className="bg-panel border border-layout-border text-text-main hover:bg-layout-hover cursor-pointer">
+          <MinusIcon size={13} />
+        </Button>
       </div>
 
       {/* Grid Canvas Area */}
@@ -77,7 +75,7 @@ export default function MapPanel() {
           className="absolute flex items-center justify-center bg-layout-active border border-layout-primary text-layout-primary w-6 h-6 rounded-full shadow-[0_0_8px_rgba(22,119,255,0.2)]"
           style={{ transform: 'translate(100px, 45px) rotate(45deg)' }}
         >
-          <NavigationArrow size={12} weight="fill" className="transform -rotate-45" />
+          <NavigationArrowIcon size={12} weight="fill" className="transform -rotate-45" />
         </div>
 
         {/* Mock Obstacles/Waypoints */}

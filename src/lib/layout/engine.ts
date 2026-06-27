@@ -1,9 +1,5 @@
 import type { LayoutDirection, LayoutGroupNode, LayoutNode, LayoutPanelNode, LayoutTab } from './types'
-
-// Helper to generate random IDs
-export function generateId(): string {
-  return Math.random().toString(36).substring(2, 9)
-}
+import { generateId } from '@/lib/id'
 
 export function findNodeById(root: LayoutNode, id: string): LayoutNode | null {
   if (root.id === id)

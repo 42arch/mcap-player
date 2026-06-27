@@ -1,7 +1,6 @@
-'use client'
-
-import { ChartLine, Pause, Play, Sliders } from '@phosphor-icons/react'
+import { ChartLineIcon, PauseIcon, PlayIcon, SlidersIcon } from '@phosphor-icons/react'
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
 
 export default function PlotPanel() {
   const [isPlaying, setIsPlaying] = useState(true)
@@ -25,8 +24,8 @@ export default function PlotPanel() {
 
   // Convert points to SVG polyline coordinates
   const svgWidth = 500
-  const svgHeight = 150
-  const padding = 10
+  const svgHeight = 200
+  const padding = 20
   const chartWidth = svgWidth - padding * 2
   const chartHeight = svgHeight - padding * 2
 
@@ -43,19 +42,21 @@ export default function PlotPanel() {
       {/* Plot Panel Controls */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-layout-border bg-titlebar h-8 text-[11px]">
         <div className="flex items-center gap-2">
-          <ChartLine size={13} className="text-layout-primary" />
+          <ChartLineIcon size={13} className="text-layout-primary" />
           <span className="font-semibold">/diagnostics/velocity</span>
         </div>
         <div className="flex items-center gap-1">
-          <button
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={() => setIsPlaying(!isPlaying)}
-            className="p-1 hover:bg-layout-hover text-text-secondary hover:text-text-main rounded-[2px]"
+            className="text-text-secondary hover:text-text-main cursor-pointer"
           >
-            {isPlaying ? <Pause size={12} /> : <Play size={12} />}
-          </button>
-          <button className="p-1 hover:bg-layout-hover text-text-secondary hover:text-text-main rounded-[2px]">
-            <Sliders size={12} />
-          </button>
+            {isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
+          </Button>
+          <Button variant="ghost" size="icon-xs" className="text-text-secondary hover:text-text-main cursor-pointer">
+            <SlidersIcon size={12} />
+          </Button>
         </div>
       </div>
 

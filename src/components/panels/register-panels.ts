@@ -1,44 +1,36 @@
-import { ChartLine, Cube, Info, MapTrifold, Terminal } from '@phosphor-icons/react'
+import { ChartLineIcon, CubeIcon, DatabaseIcon, MapTrifoldIcon } from '@phosphor-icons/react'
 import { panelRegistry } from '@/lib/layout/registry'
-import InspectorPanel from './InspectorPanel'
 import MapPanel from './MapPanel'
 import PlotPanel from './PlotPanel'
+import RawDataPanel from './RawDataPanel'
 import ScenePanel from './ScenePanel'
-import TerminalPanel from './TerminalPanel'
 
 export function registerAllPanels() {
   panelRegistry.register({
     type: 'Scene',
     title: '3D Scene View',
-    icon: Cube,
+    icon: CubeIcon,
     component: ScenePanel,
   })
 
   panelRegistry.register({
     type: 'Plot',
     title: 'Plot Diagnostics',
-    icon: ChartLine,
+    icon: ChartLineIcon,
     component: PlotPanel,
   })
 
   panelRegistry.register({
     type: 'Map',
     title: 'Map Telemetry',
-    icon: MapTrifold,
+    icon: MapTrifoldIcon,
     component: MapPanel,
   })
 
   panelRegistry.register({
-    type: 'Inspector',
-    title: 'Property Inspector',
-    icon: Info,
-    component: InspectorPanel,
-  })
-
-  panelRegistry.register({
-    type: 'Terminal',
-    title: 'Console Terminal',
-    icon: Terminal,
-    component: TerminalPanel,
+    type: 'RawData',
+    title: 'Raw Message Inspector',
+    icon: DatabaseIcon,
+    component: RawDataPanel,
   })
 }

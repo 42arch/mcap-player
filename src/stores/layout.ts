@@ -1,97 +1,80 @@
-import type { LayoutDirection, LayoutNode, LayoutTab } from './types'
+import type { LayoutDirection, LayoutNode, LayoutTab } from '@/lib/layout/types'
 import { create } from 'zustand'
+import { generateId } from '@/lib/id'
 import {
   addTabToPanel,
   cloneTree,
   closeTab,
   findNodeById,
-  generateId,
-  splitPanel,
   moveTab,
+  splitPanel,
   splitPanelWithExistingTab,
-} from './engine'
+} from '@/lib/layout/engine'
 
 interface LayoutState {
   layoutTree: LayoutNode | null
-  activeActivityId: string
-  bottomPanelOpen: boolean
-  bottomPanelSize: number // percentage (e.g. 25)
-  bottomPanelActiveTab: string
   draggedTab: { panelId: string, tabId: string } | null
+  activePanelId: string | null
+  activePanelType: string | null
+  activeTabId: string | null
 
+  addPanelToEmptyLayout: (tabType: string, tabTitle: string) => void
   selectTab: (panelId: string, tabId: string) => void
   closeTab: (panelId: string, tabId: string) => void
   addTab: (panelId: string, tabType: string, tabTitle: string) => void
   replaceActiveTab: (panelId: string, tabType: string, tabTitle: string) => void
   splitPanel: (panelId: string, direction: LayoutDirection, tabType: string, tabTitle: string, before?: boolean) => void
   updateSizes: (groupId: string, sizes: number[]) => void
-  toggleBottomPanel: (open?: boolean) => void
-  setBottomPanelSize: (size: number) => void
-  setBottomPanelTab: (tabId: string) => void
-  setActiveActivityId: (id: string) => void
   resetLayout: () => void
   setDraggedTab: (draggedTab: { panelId: string, tabId: string } | null) => void
   moveTab: (sourcePanelId: string, tabId: string, targetPanelId: string, targetIndex?: number) => void
   splitPanelWithExistingTab: (sourcePanelId: string, tabId: string, targetPanelId: string, direction: LayoutDirection, before?: boolean) => void
-}
-
-const defaultLayout: LayoutNode = {
-  id: 'root-group',
-  type: 'group',
-  direction: 'horizontal',
-  children: [
-    {
-      id: 'left-group',
-      type: 'group',
-      direction: 'vertical',
-      children: [
-        {
-          id: 'map-panel',
-          type: 'panel',
-          tabs: [
-            { id: 'tab-map', type: 'Map', title: 'Map' },
-          ],
-          activeTabId: 'tab-map',
-        },
-        {
-          id: 'plot-panel',
-          type: 'panel',
-          tabs: [
-            { id: 'tab-plot', type: 'Plot', title: 'Plot' },
-          ],
-          activeTabId: 'tab-plot',
-        },
-      ],
-      sizes: [50, 50],
-    },
-    {
-      id: 'right-panel',
-      type: 'panel',
-      tabs: [
-        { id: 'tab-scene', type: 'Scene', title: 'Scene' },
-      ],
-      activeTabId: 'tab-scene',
-    },
-  ],
-  sizes: [65, 35],
+  setActivePanel: (panelId: string | null, panelType: string | null) => void
+  updateTabConfig: (panelId: string, tabId: string, config: Record<string, any>) => void
 }
 
 export const useLayoutStore = create<LayoutState>(set => ({
-  layoutTree: defaultLayout,
-  activeActivityId: 'explorer',
-  bottomPanelOpen: true,
-  bottomPanelSize: 25,
-  bottomPanelActiveTab: 'terminal',
+  layoutTree: null,
+  activePanelId: null,
+  activePanelType: null,
+  activeTabId: null,
+
+  addPanelToEmptyLayout: (tabType, tabTitle) => set(() => {
+    const tabId = `tab-${generateId()}`
+    const panelId = `panel-${generateId()}`
+    const newNode: LayoutNode = {
+      id: panelId,
+      type: 'panel',
+      tabs: [
+        { id: tabId, type: tabType, title: tabTitle },
+      ],
+      activeTabId: tabId,
+    }
+    return {
+      layoutTree: newNode,
+      activePanelId: panelId,
+      activePanelType: tabType,
+      activeTabId: tabId,
+    }
+  }),
 
   selectTab: (panelId, tabId) => set((state) => {
     if (!state.layoutTree)
       return state
     const cloned = cloneTree(state.layoutTree)
     const node = findNodeById(cloned, panelId)
+    let panelType: string | null = null
     if (node && node.type === 'panel') {
       node.activeTabId = tabId
+      const activeTabObj = node.tabs.find(t => t.id === tabId)
+      panelType = activeTabObj ? activeTabObj.type : null
     }
-    return { layoutTree: cloned }
+    return {
+      layoutTree: cloned,
+      activePanelId: panelId,
+      activePanelType: panelType,
+      activeTabId: tabId,
+    }
   }),
 
   closeTab: (panelId, tabId) => set((state) => {
@@ -110,7 +93,12 @@ export const useLayoutStore = create<LayoutState>(set => ({
       title: tabTitle,
     }
     const newTree = addTabToPanel(state.layoutTree, panelId, newTab)
-    return { layoutTree: newTree }
+    return {
+      layoutTree: newTree,
+      activePanelId: panelId,
+      activePanelType: tabType,
+      activeTabId: newTab.id,
+    }
   }),
 
   replaceActiveTab: (panelId, tabType, tabTitle) => set((state) => {
@@ -151,17 +139,7 @@ export const useLayoutStore = create<LayoutState>(set => ({
     return { layoutTree: cloned }
   }),
 
-  toggleBottomPanel: open => set(state => ({
-    bottomPanelOpen: open !== undefined ? open : !state.bottomPanelOpen,
-  })),
-
-  setBottomPanelSize: size => set({ bottomPanelSize: size }),
-
-  setBottomPanelTab: tabId => set({ bottomPanelActiveTab: tabId }),
-
-  setActiveActivityId: id => set({ activeActivityId: id }),
-
-  resetLayout: () => set({ layoutTree: defaultLayout }),
+  resetLayout: () => set({ layoutTree: null }),
 
   draggedTab: null,
   setDraggedTab: draggedTab => set({ draggedTab }),
@@ -178,5 +156,28 @@ export const useLayoutStore = create<LayoutState>(set => ({
       return state
     const newTree = splitPanelWithExistingTab(state.layoutTree, sourcePanelId, tabId, targetPanelId, direction, before)
     return { layoutTree: newTree, draggedTab: null }
+  }),
+  setActivePanel: (panelId, panelType) => set((state) => {
+    // If the panel type or activeTabId changed, sync activeTabId too
+    const node = state.layoutTree ? findNodeById(state.layoutTree, panelId || '') : null
+    const activeTabId = node && node.type === 'panel' ? node.activeTabId : null
+    return {
+      activePanelId: panelId,
+      activePanelType: panelType,
+      activeTabId,
+    }
+  }),
+  updateTabConfig: (panelId, tabId, config) => set((state) => {
+    if (!state.layoutTree)
+      return state
+    const cloned = cloneTree(state.layoutTree)
+    const node = findNodeById(cloned, panelId)
+    if (node && node.type === 'panel') {
+      const tab = node.tabs.find(t => t.id === tabId)
+      if (tab) {
+        tab.config = { ...tab.config, ...config }
+      }
+    }
+    return { layoutTree: cloned }
   }),
 }))

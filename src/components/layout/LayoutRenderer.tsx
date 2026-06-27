@@ -1,9 +1,7 @@
-'use client'
-
 import type { LayoutNode } from '@/lib/layout/types'
-import React from 'react'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import { useLayoutStore } from '@/lib/layout/store'
+import { Fragment } from 'react'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import { useLayoutStore } from '@/stores/layout'
 import PanelWrapper from './PanelWrapper'
 
 interface LayoutRendererProps {
@@ -19,31 +17,32 @@ export default function LayoutRenderer({ node }: LayoutRendererProps) {
 
   const direction = node.direction
 
-  const handleLayout = (sizes: number[]) => {
+  const handleLayout = (layout: Record<string, number>) => {
+    const sizes = node.children.map(child => layout[child.id] ?? 0)
     updateSizes(node.id, sizes)
   }
 
   return (
-    <PanelGroup
-      direction={direction}
-      onLayout={handleLayout}
+    <ResizablePanelGroup
+      orientation={direction}
+      onLayoutChange={handleLayout}
       className="w-full h-full"
     >
       {node.children.map((child, idx) => {
         const defaultSize = node.sizes ? node.sizes[idx] : undefined
         return (
-          <React.Fragment key={child.id}>
-            <Panel defaultSize={defaultSize} minSize={15}>
+          <Fragment key={child.id}>
+            <ResizablePanel defaultSize={defaultSize !== undefined ? `${defaultSize}%` : undefined} minSize="15%" id={child.id}>
               <div className="w-full h-full overflow-hidden">
                 <LayoutRenderer node={child} />
               </div>
-            </Panel>
+            </ResizablePanel>
             {idx < node.children.length - 1 && (
-              <PanelResizeHandle />
+              <ResizableHandle />
             )}
-          </React.Fragment>
+          </Fragment>
         )
       })}
-    </PanelGroup>
+    </ResizablePanelGroup>
   )
 }

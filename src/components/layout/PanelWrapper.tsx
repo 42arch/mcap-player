@@ -1,10 +1,9 @@
-'use client'
-
+import type { DragEvent } from 'react'
 import type { LayoutPanelNode } from '@/lib/layout/types'
+import { useEffect, useState } from 'react'
 import { panelRegistry } from '@/lib/layout/registry'
-import TabBar from './TabBar'
-import { useLayoutStore } from '@/lib/layout/store'
-import React from 'react'
+import { useLayoutStore } from '@/stores/layout'
+import PanelHeader from './PanelHeader'
 
 interface PanelWrapperProps {
   node: LayoutPanelNode
@@ -18,11 +17,13 @@ export default function PanelWrapper({ node }: PanelWrapperProps) {
   const setDraggedTab = useLayoutStore(state => state.setDraggedTab)
   const moveTab = useLayoutStore(state => state.moveTab)
   const splitPanelWithExistingTab = useLayoutStore(state => state.splitPanelWithExistingTab)
+  const activePanelId = useLayoutStore(state => state.activePanelId)
+  const setActivePanel = useLayoutStore(state => state.setActivePanel)
 
-  const [activeZone, setActiveZone] = React.useState<'center' | 'left' | 'right' | 'top' | 'bottom' | null>(null)
+  const [activeZone, setActiveZone] = useState<'center' | 'left' | 'right' | 'top' | 'bottom' | null>(null)
 
   // Listen to global dragend to reset dragged state in case element unmounts or drag cancels
-  React.useEffect(() => {
+  useEffect(() => {
     const handleGlobalDragEnd = () => {
       setDraggedTab(null)
       setActiveZone(null)
@@ -33,23 +34,24 @@ export default function PanelWrapper({ node }: PanelWrapperProps) {
     }
   }, [setDraggedTab])
 
-  const handleDragOver = (e: React.DragEvent, zone: 'center' | 'left' | 'right' | 'top' | 'bottom') => {
+  const handleDragOver = (e: DragEvent, zone: 'center' | 'left' | 'right' | 'top' | 'bottom') => {
     e.preventDefault()
     e.stopPropagation()
     setActiveZone(zone)
   }
 
-  const handleDragLeave = (e: React.DragEvent) => {
+  const handleDragLeave = (e: DragEvent) => {
     e.preventDefault()
     // Only clear if the cursor actually leaves to prevent flickering
     setActiveZone(null)
   }
 
-  const handleDrop = (e: React.DragEvent, zone: 'center' | 'left' | 'right' | 'top' | 'bottom') => {
+  const handleDrop = (e: DragEvent, zone: 'center' | 'left' | 'right' | 'top' | 'bottom') => {
     e.preventDefault()
     e.stopPropagation()
     setActiveZone(null)
-    if (!draggedTab) return
+    if (!draggedTab)
+      return
 
     // Don't split or move to itself if it's the only tab in this panel
     if (draggedTab.panelId === node.id && node.tabs.length === 1) {
@@ -73,10 +75,17 @@ export default function PanelWrapper({ node }: PanelWrapperProps) {
     }
   }
 
+  const isActivePanel = activePanelId === node.id
+
   return (
-    <div className="w-full h-full flex flex-col bg-panel overflow-hidden relative">
-      {/* Tab Bar */}
-      <TabBar panelId={node.id} tabs={node.tabs} activeTabId={node.activeTabId} />
+    <div
+      onClick={() => setActivePanel(node.id, activeTab?.type || null)}
+      className={`w-full h-full flex flex-col bg-panel overflow-hidden relative border transition-all ${
+        isActivePanel ? 'border-layout-active' : 'border-transparent'
+      }`}
+    >
+      {/* Panel Header */}
+      <PanelHeader panelId={node.id} tabs={node.tabs} activeTabId={node.activeTabId} />
 
       {/* Panel Content */}
       <div className="flex-1 min-h-0 relative overflow-hidden bg-panel">
