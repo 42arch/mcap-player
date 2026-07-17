@@ -1,9 +1,16 @@
 import { Radio } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { JsonViewer } from '@/components/ui/json-viewer'
-import { globalMessageBus } from '@/core/MessageBus'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { globalMessageBus } from '@/core/message-bus'
 import { formatBytes, formatNanoseconds } from '@/lib/time'
-import { usePlayerStore } from '@/stores/usePlayerStore'
+import { usePlayerStore } from '@/stores/use-player-store'
 
 interface MessageViewerProps {
   topic: string
@@ -14,15 +21,11 @@ function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
   const [msg, setMsg] = useState<any | null>(null)
 
   useEffect(() => {
+    // Clear message when topic changes to prevent showing stale data of previous topic
+    setMsg(null)
+
     let latestMsg: any = null
     let hasNew = false
-
-    // Clear state on seek
-    const unsubSeek = globalMessageBus.subscribe('__seek__', () => {
-      latestMsg = null
-      hasNew = false
-      setMsg(null)
-    })
 
     // Listen to topic message bus
     const unsub = globalMessageBus.subscribe(topic, (newMsg) => {
@@ -40,7 +43,6 @@ function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
     }, intervalMs)
 
     return () => {
-      unsubSeek()
       unsub()
       clearInterval(interval)
     }
@@ -91,10 +93,14 @@ function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
   )
 }
 
-export default function RawMessageStream() {
+export default function RawMessagePanel() {
+  const fileSummary = usePlayerStore(state => state.fileSummary)
+  const setSubscribedTopics = usePlayerStore(state => state.setSubscribedTopics)
   const subscribedTopics = usePlayerStore(state => state.subscribedTopics)
   const refreshRateHz = usePlayerStore(state => state.messagesSettings.refreshRateHz)
   const activeTopic = Array.from(subscribedTopics)[0]
+
+  const channels = fileSummary?.channels || []
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background p-4">
@@ -107,10 +113,34 @@ export default function RawMessageStream() {
               Raw Message Inspector
             </span>
           </div>
-          {activeTopic && (
-            <span className="font-mono text-[10px] bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-bold">
-              {activeTopic}
-            </span>
+
+          {fileSummary && channels.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                Topic:
+              </span>
+              <Select
+                value={activeTopic || ''}
+                onValueChange={(val) => {
+                  if (val) {
+                    setSubscribedTopics(new Set([val]))
+                  } else {
+                    setSubscribedTopics(new Set())
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="w-48 bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
+                  <SelectValue placeholder="Select topic..." />
+                </SelectTrigger>
+                <SelectContent position="popper" className="bg-popover text-popover-foreground">
+                  {channels.map((ch) => (
+                    <SelectItem key={ch.id} value={ch.topic} className="font-mono text-[10px] py-1 h-6 min-h-0">
+                      {ch.topic}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
         </div>
 
@@ -120,7 +150,7 @@ export default function RawMessageStream() {
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-card">
                 <p className="text-xs font-semibold">No Topic Selected</p>
                 <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
-                  Please select a topic under the **Topics** tab or in **Settings** in the LeftSideBar to inspect its payload details.
+                  Please select an active topic from the dropdown selector in the header to inspect its payload details.
                 </p>
               </div>
             )

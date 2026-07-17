@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { globalMessageBus } from '@/core/MessageBus'
-import { usePlayerStore } from '@/stores/usePlayerStore'
+import { globalMessageBus } from '@/core/message-bus'
+import { usePlayerStore } from '@/stores/use-player-store'
 
 /** Subscribe to a topic for playback updates; unsubscribes on unmount or topic change. */
 export function useTopicSubscription(topic: string | undefined, callback: (msg: any) => void): void {

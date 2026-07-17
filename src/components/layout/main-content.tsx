@@ -1,15 +1,15 @@
 import { AlertCircle, ChevronDown, FileCode, LayoutGrid, Loader2 } from 'lucide-react'
+import OverviewPanel from '@/components/panels/overview-panel'
+import RawMessagePanel from '@/components/panels/raw-message-panel'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { globalPlaybackController } from '@/core/PlaybackController'
-import { usePlayerStore } from '@/stores/usePlayerStore'
-import FileOverview from './FileOverview'
-import LandingView from './LandingView'
-import RawMessageStream from './RawMessageStream'
+import { globalPlaybackController } from '@/core/playback-controller'
+import { usePlayerStore } from '@/stores/use-player-store'
+import LandingView from './landing-view'
 
 interface MainContentProps {
   darkMode: boolean
@@ -140,10 +140,10 @@ export default function MainContent({ darkMode }: MainContentProps) {
       <div className="flex-1 min-h-0 flex flex-col">
         {activePanel === 'overview'
           ? (
-              <FileOverview fileSummary={fileSummary} />
+              <OverviewPanel fileSummary={fileSummary} />
             )
           : (
-              <RawMessageStream />
+              <RawMessagePanel />
             )}
       </div>
     </div>

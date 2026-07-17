@@ -1,17 +1,16 @@
-import { CheckCircle, Circle, FileText, Info, Radio, Search } from 'lucide-react'
+import { FileText, Info, Radio, Search } from 'lucide-react'
 import { useState } from 'react'
+import OverviewSetting from '@/components/panels/overview-setting'
+import RawMessageSetting from '@/components/panels/raw-message-setting'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { usePlayerStore } from '@/stores/usePlayerStore'
-import PanelSettings from './PanelSettings'
+import { usePlayerStore } from '@/stores/use-player-store'
 
 export default function LeftSideBar() {
   const {
+    activePanel,
     fileSummary,
-    subscribedTopics,
     selectedTopic,
-    toggleTopicSubscription,
     setSelectedTopic,
-    setSubscribedTopics,
   } = usePlayerStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'topics' | 'settings'>('topics')
@@ -39,9 +38,7 @@ export default function LeftSideBar() {
         && ch.schemaName.toLowerCase().includes(searchQuery.toLowerCase())),
   )
 
-  const handleDeselectAll = () => {
-    setSubscribedTopics(new Set())
-  }
+
 
   const selectedChannel = fileSummary.channels.find(
     ch => ch.topic === selectedTopic,
@@ -99,15 +96,7 @@ export default function LeftSideBar() {
                     className="w-full pl-8 pr-3 py-1.5 text-[11px] bg-background border border-border rounded-md placeholder-muted-foreground/70 focus:outline-hidden focus:ring-1 focus:ring-ring transition-all"
                   />
                 </div>
-                {/* Bulk select actions */}
-                <div className="flex items-center gap-2 pt-1 text-[10px]">
-                  <button
-                    onClick={handleDeselectAll}
-                    className="text-primary hover:underline cursor-pointer"
-                  >
-                    Clear Selection
-                  </button>
-                </div>
+
               </div>
 
               {/* Topic List */}
@@ -121,7 +110,6 @@ export default function LeftSideBar() {
                       )
                     : (
                         filteredChannels.map((ch) => {
-                          const isSubscribed = subscribedTopics.has(ch.topic)
                           const isSelected = selectedTopic === ch.topic
                           return (
                             <div
@@ -133,23 +121,6 @@ export default function LeftSideBar() {
                                   : 'hover:bg-accent hover:text-accent-foreground border-transparent hover:border-border/30'
                               }`}
                             >
-                              {/* Subscription Radio */}
-                              <div
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  toggleTopicSubscription(ch.topic)
-                                }}
-                                className="p-0.5 hover:bg-muted rounded-full cursor-pointer mr-2 shrink-0 text-muted-foreground hover:text-primary transition-colors mt-0.5"
-                                title={isSubscribed ? 'Selected' : 'Select'}
-                              >
-                                {isSubscribed
-                                  ? (
-                                      <CheckCircle className="w-3.5 h-3.5 text-primary" />
-                                    )
-                                  : (
-                                      <Circle className="w-3.5 h-3.5 opacity-60" />
-                                    )}
-                              </div>
 
                               <div className="flex-1 min-h-0 flex flex-col">
                                 <div className="flex items-start justify-between gap-2">
@@ -223,9 +194,13 @@ export default function LeftSideBar() {
               )}
             </div>
           )
-        : (
-            <PanelSettings />
-          )}
+        : activePanel === 'overview'
+          ? (
+              <OverviewSetting />
+            )
+          : (
+              <RawMessageSetting />
+            )}
     </div>
   )
 }

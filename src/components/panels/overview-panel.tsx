@@ -1,13 +1,13 @@
-import type { McapFileSummary } from '@/stores/usePlayerStore'
+import type { McapFileSummary } from '@/stores/use-player-store'
 import { Clock, Code2, Database, Info, Radio } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatBytes, formatDuration, formatNanoseconds } from '@/lib/time'
 
-interface FileOverviewProps {
+interface OverviewPanelProps {
   fileSummary: McapFileSummary
 }
 
-export default function FileOverview({ fileSummary }: FileOverviewProps) {
+export default function OverviewPanel({ fileSummary }: OverviewPanelProps) {
   return (
     <div className="flex-1 min-h-0 p-4 flex flex-col gap-4 overflow-hidden bg-background">
       {/* Stats Summary Section */}

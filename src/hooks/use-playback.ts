@@ -1,5 +1,5 @@
-import { globalPlaybackController } from '@/core/PlaybackController'
-import { usePlayerStore } from '@/stores/usePlayerStore'
+import { globalPlaybackController } from '@/core/playback-controller'
+import { usePlayerStore } from '@/stores/use-player-store'
 
 export function usePlaybackTime() {
   const elapsedNs = usePlayerStore(state => state.elapsedNs)

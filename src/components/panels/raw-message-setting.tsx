@@ -1,26 +1,11 @@
-import { CheckCircle, Circle } from 'lucide-react'
-import { usePlayerStore } from '@/stores/usePlayerStore'
+import { usePlayerStore } from '@/stores/use-player-store'
 
-export default function PanelSettings() {
+export default function RawMessageSetting() {
   const {
-    activePanel,
     messagesSettings,
     updateMessagesSettings,
     fileSummary,
-    subscribedTopics,
-    toggleTopicSubscription,
   } = usePlayerStore()
-
-  if (activePanel === 'overview') {
-    return (
-      <div className="p-4 flex flex-col items-center justify-center text-center text-muted-foreground h-48 space-y-2">
-        <span className="text-xs font-semibold">No Settings Available</span>
-        <span className="text-[10px] text-muted-foreground/60 max-w-[200px] leading-relaxed">
-          The Overview panel displays static metadata definitions and does not require runtime configurations.
-        </span>
-      </div>
-    )
-  }
 
   const hzOptions = [1, 5, 10, 15, 30, 60]
   const formatOptions = [
@@ -91,44 +76,6 @@ export default function PanelSettings() {
           </div>
         </div>
 
-        {/* Topic Subscription Panel Settings */}
-        {fileSummary && (
-          <div className="space-y-2.5 pt-4 border-t border-border/45">
-            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block flex items-center justify-between">
-              <span>Topic Selection</span>
-              <span className="text-[9px] bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded-full font-mono font-bold">
-                {subscribedTopics.size}
-                {' '}
-                active
-              </span>
-            </label>
-            <div className="space-y-1 bg-background border border-border/40 rounded-lg p-2 max-h-48 overflow-y-auto">
-              {fileSummary.channels.map((ch) => {
-                const isSubscribed = subscribedTopics.has(ch.topic)
-                return (
-                  <div
-                    key={ch.id}
-                    onClick={() => toggleTopicSubscription(ch.topic)}
-                    className="flex items-center justify-between p-1.5 rounded-md hover:bg-accent/40 cursor-pointer select-none text-[10px] font-mono"
-                  >
-                    <span className="truncate pr-2 text-foreground font-medium flex items-center gap-1.5" title={ch.topic}>
-                      {ch.topic}
-                    </span>
-                    <span className="shrink-0 text-muted-foreground">
-                      {isSubscribed
-                        ? (
-                            <CheckCircle className="w-4 h-4 text-primary" />
-                          )
-                        : (
-                            <Circle className="w-4 h-4 text-muted-foreground/45" />
-                          )}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   )

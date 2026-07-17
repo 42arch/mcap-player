@@ -244,9 +244,9 @@ mcap-viewer/
 │   │   └── globals.css              # 全局 CSS 样式 (Tailwind v4)
 │   │
 │   ├── core/                        # 播放控制与时钟核心逻辑 (React无关)
-│   │   ├── PlaybackClock.ts         # 线性时钟
-│   │   ├── PlaybackController.ts    # 播放状态机控制器
-│   │   └── MessageBus.ts            # 高频订阅事件总线
+│   │   ├── playback-clock.ts        # 线性时钟
+│   │   ├── playback-controller.ts   # 播放状态机控制器
+│   │   └── message-bus.ts           # 高频订阅事件总线
 │   │
 │   ├── infra/                       # 基础设施层 (数据读取与解析)
 │   │   ├── io/
@@ -264,7 +264,7 @@ mcap-viewer/
 │   │       └── workerPerf.ts        # 性能检测统计器
 │   │
 │   ├── stores/                      # 全局状态管理
-│   │   └── usePlayerStore.ts        # Zustand 低频状态 Store
+│   │   └── use-player-store.ts      # Zustand 低频状态 Store
 │   │
 │   ├── hooks/                       # 快捷 React 钩子
 │   │   └── useTopicSubscription.ts  # 独立于 React 渲染的高频话题订阅 Hook

@@ -1,5 +1,5 @@
 import { Pause, Play, SkipBack, SkipForward } from 'lucide-react'
-import { usePlaybackControls } from '@/hooks/usePlayback'
+import { usePlaybackControls } from '@/hooks/use-playback'
 import { formatDuration } from '@/lib/time'
 
 export default function PlayBack() {

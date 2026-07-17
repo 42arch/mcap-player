@@ -1,7 +1,7 @@
 import { wrap } from 'comlink'
-import { usePlayerStore } from '@/stores/usePlayerStore'
-import { globalMessageBus } from './MessageBus'
-import { PlaybackClock } from './PlaybackClock'
+import { usePlayerStore } from '@/stores/use-player-store'
+import { globalMessageBus } from './message-bus'
+import { PlaybackClock } from './playback-clock'
 
 export class PlaybackController {
   private worker: any = null

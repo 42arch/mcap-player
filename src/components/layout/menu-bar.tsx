@@ -8,8 +8,8 @@ import {
   MenubarSeparator,
   MenubarTrigger,
 } from '@/components/ui/menubar'
-import { globalPlaybackController } from '@/core/PlaybackController'
-import { usePlayerStore } from '@/stores/usePlayerStore'
+import { globalPlaybackController } from '@/core/playback-controller'
+import { usePlayerStore } from '@/stores/use-player-store'
 
 interface MenuBarProps {
   darkMode: boolean

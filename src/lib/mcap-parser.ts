@@ -1,4 +1,4 @@
-import type { McapChannel, McapFileSummary, McapMessage, McapSchema } from '@/stores/usePlayerStore'
+import type { McapChannel, McapFileSummary, McapMessage, McapSchema } from '@/stores/use-player-store'
 import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'

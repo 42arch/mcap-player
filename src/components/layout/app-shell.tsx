@@ -5,10 +5,10 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
-import LeftSideBar from './LeftSideBar'
-import MainContent from './MainContent'
-import MenuBar from './MenuBar'
-import PlayBack from './PlayBack'
+import LeftSideBar from './left-side-bar'
+import MainContent from './main-content'
+import MenuBar from './menu-bar'
+import PlayBack from './play-back'
 
 export default function AppShell() {
   const { setTheme, resolvedTheme } = useTheme()
