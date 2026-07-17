@@ -1,77 +1,63 @@
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
-import { useMcapStore } from '@/stores/mcap'
-import BottomArea from './BottomArea'
-import DockArea from './DockArea'
-import NavBar from './NavBar'
-import OverviewArea from './OverviewArea'
+import { useTheme } from 'next-themes'
+import { useEffect, useState } from 'react'
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable'
+import LeftSideBar from './LeftSideBar'
+import MainContent from './MainContent'
+import MenuBar from './MenuBar'
+import PlayBack from './PlayBack'
 
 export default function AppShell() {
-  const loading = useMcapStore(state => state.loading)
-  const loadingProgress = useMcapStore(state => state.loadingProgress)
+  const { setTheme, resolvedTheme } = useTheme()
+  const [mounted, setMounted] = useState(false)
 
-  const loadingPercent = loadingProgress
-    ? Math.min(100, Math.round((loadingProgress.loaded / loadingProgress.total) * 100))
-    : 0
+  // Avoid hydration mismatch by waiting for mount
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  if (!mounted) {
+    return <div className="h-screen bg-background" />
+  }
+
+  const darkMode = resolvedTheme === 'dark'
+  const setDarkMode = (dark: boolean) => setTheme(dark ? 'dark' : 'light')
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-workbench text-text-main font-sans select-none relative">
-      {/* Loading Progress Indicator Overlay */}
-      {loading && (
-        <div className="absolute inset-0 bg-[#000000]/60 backdrop-blur-md z-50 flex flex-col items-center justify-center gap-4 px-12">
-          <div className="w-10 h-10 rounded-full border-2 border-layout-primary border-t-transparent animate-spin"></div>
-          <div className="text-center w-64 max-w-xs space-y-3 font-mono">
-            <p className="text-[11px] font-bold tracking-wider text-layout-primary uppercase">Parsing MCAP Datastream</p>
-            <div className="w-full bg-layout-border h-1 rounded-full overflow-hidden">
-              <div
-                className="bg-layout-primary h-full transition-all duration-300"
-                style={{ width: `${loadingPercent}%` }}
-              />
-            </div>
-            {loadingProgress && (
-              <p className="text-[9px] text-text-secondary">
-                Parsed:
-                {' '}
-                {loadingProgress.loaded.toLocaleString()}
-                {' '}
-                /
-                {' '}
-                {loadingProgress.total.toLocaleString()}
-                {' '}
-                messages (
-                {loadingPercent}
-                %)
-              </p>
-            )}
-          </div>
-        </div>
-      )}
+    <div className="workspace-font-override h-screen flex flex-col bg-background text-foreground select-none text-[11px] font-sans tracking-tight antialiased transition-colors duration-300">
+      {/* Workspace Menubar */}
+      <MenuBar darkMode={darkMode} setDarkMode={setDarkMode} />
 
-      {/* Nav Bar */}
-      <NavBar />
+      {/* Editor Body */}
+      <div className="flex-1 flex min-h-0">
+        <ResizablePanelGroup orientation="vertical" className="flex-1">
+          {/* Top panel containing sidebar and main canvas */}
+          <ResizablePanel defaultSize="90%" className="flex min-h-0">
+            <ResizablePanelGroup orientation="horizontal" className="flex-1">
+              {/* Left Side Bar */}
+              <ResizablePanel defaultSize="25%" minSize="20%" maxSize="30%" className="bg-card flex flex-col shrink-0">
+                <LeftSideBar />
+              </ResizablePanel>
 
-      {/* Main Body */}
-      <div className="flex-1 flex min-h-0 relative overflow-hidden">
-        {/* Main Side: Workspace (Dock + Bottom Panel) */}
-        <main className="flex-1 h-full min-w-0 relative overflow-hidden flex flex-col">
-          <ResizablePanelGroup orientation="vertical">
-            <ResizablePanel minSize="20%" id="main-content">
-              <ResizablePanelGroup orientation="horizontal">
-                <ResizablePanel defaultSize="25%" minSize="10%" maxSize="33%" id="sidebar-panel">
-                  <OverviewArea />
-                </ResizablePanel>
-                <ResizableHandle />
-                <ResizablePanel minSize="67%" id="dock-panel">
-                  <DockArea />
-                </ResizablePanel>
-              </ResizablePanelGroup>
-            </ResizablePanel>
+              <ResizableHandle withHandle />
 
-            <ResizableHandle />
-            <ResizablePanel defaultSize="25%" minSize="5%" maxSize="25%" id="bottom-panel">
-              <BottomArea />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </main>
+              {/* Center Main Content Area */}
+              <ResizablePanel defaultSize="75%" className="relative bg-background overflow-hidden">
+                <MainContent darkMode={darkMode} />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          </ResizablePanel>
+
+          <ResizableHandle />
+
+          {/* Bottom Panel (PlayBack Controller) */}
+          <ResizablePanel defaultSize="10%" minSize="10%" maxSize="10%" className="bg-card shrink-0">
+            <PlayBack />
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
     </div>
   )

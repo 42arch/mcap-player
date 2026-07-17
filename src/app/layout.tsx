@@ -1,26 +1,21 @@
 import type { Metadata } from 'next'
 import { NextIntlClientProvider } from 'next-intl'
 import { getLocale, getMessages } from 'next-intl/server'
+import { Geist, Roboto } from 'next/font/google'
 import localFont from 'next/font/local'
 import { ThemeProvider } from '@/components/theme-provider'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import './globals.css'
 
-const geistSans = localFont({
-  src: '../../public/fonts/Geist-Variable.woff2',
-  variable: '--font-sans',
-})
+const geist = Geist({ subsets: ['latin'], variable: '--font-sans' })
 
 const geistMono = localFont({
   src: '../../public/fonts/GeistMono-Variable.woff2',
   variable: '--font-geist-mono',
 })
 
-const geistHeading = localFont({
-  src: '../../public/fonts/Geist-Variable.woff2',
-  variable: '--font-heading',
-})
+const robotoHeading = Roboto({ subsets: ['latin'], variable: '--font-heading' })
 
 export const metadata: Metadata = {
   title: 'MCAPVIEW',
@@ -38,7 +33,7 @@ export default async function RootLayout({
   return (
     <html
       lang={locale}
-      className={cn('h-full', 'antialiased', geistSans.variable, geistMono.variable, geistHeading.variable, 'font-sans')}
+      className={cn('h-full', 'antialiased', geistMono.variable, 'font-sans', 'font-sans', geist.variable, robotoHeading.variable)}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col">
