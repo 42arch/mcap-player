@@ -1,5 +1,5 @@
-import { CaretDownIcon, CaretRightIcon, CheckIcon, CopyIcon } from '@phosphor-icons/react'
-import { useEffect, useState } from 'react'
+import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react'
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface JsonRowProps {
@@ -31,7 +31,7 @@ function JsonRow({ className, indentClass, onClick, copyText, children }: JsonRo
       className={cn(
         'group/row flex items-center w-full select-none text-[10px] py-[1px] leading-normal font-mono relative',
         indentClass,
-        onClick && 'cursor-pointer hover:bg-layout-hover/20',
+        onClick && 'cursor-pointer hover:bg-muted/30',
         className,
       )}
     >
@@ -40,15 +40,15 @@ function JsonRow({ className, indentClass, onClick, copyText, children }: JsonRo
       </div>
       <button
         onClick={handleCopy}
-        className="opacity-0 group-hover/row:opacity-100 ml-1 p-0.5 text-zinc-400 hover:text-layout-primary hover:bg-layout-hover/50 shrink-0 transition-opacity rounded-[2px]"
+        className="opacity-0 group-hover/row:opacity-100 ml-1 p-0.5 text-muted-foreground hover:text-primary hover:bg-muted/80 shrink-0 transition-opacity rounded-[2px]"
         title="Copy line"
       >
         {copied
           ? (
-              <CheckIcon size={10} className="text-emerald-500" />
+              <Check className="w-2.5 h-2.5 text-emerald-500" />
             )
           : (
-              <CopyIcon size={10} />
+              <Copy className="w-2.5 h-2.5" />
             )}
       </button>
     </div>
@@ -59,19 +59,19 @@ interface JsonNodeProps {
   name?: string | number
   value: any
   depth: number
-  globalExpanded: boolean | null
+  expandState: 'default' | 'expanded' | 'collapsed'
 }
 
-function JsonNode({ name, value, depth, globalExpanded }: JsonNodeProps) {
+function JsonNode({ name, value, depth, expandState }: JsonNodeProps) {
   const isObject = value !== null && typeof value === 'object'
   const isArray = Array.isArray(value)
-  const [expanded, setExpanded] = useState(depth < 2)
-
-  useEffect(() => {
-    if (globalExpanded !== null) {
-      setExpanded(globalExpanded)
-    }
-  }, [globalExpanded])
+  const [expanded, setExpanded] = useState(() => {
+    if (expandState === 'expanded')
+      return true
+    if (expandState === 'collapsed')
+      return false
+    return depth < 2
+  })
 
   const toggleExpand = () => {
     setExpanded(prev => !prev)
@@ -89,7 +89,7 @@ function JsonNode({ name, value, depth, globalExpanded }: JsonNodeProps) {
       )
     }
     return (
-      <span className="text-blue-600 dark:text-sky-400 font-semibold font-mono mr-1.5 break-all select-none">
+      <span className="text-blue-600 dark:text-blue-400 font-semibold font-mono mr-1.5 break-all select-none">
         &quot;
         {name}
         &quot;:
@@ -167,14 +167,14 @@ function JsonNode({ name, value, depth, globalExpanded }: JsonNodeProps) {
         className="py-[1px]"
         copyText={headerCopyText}
       >
-        <div className="w-3.5 h-3.5 flex items-center justify-center text-zinc-400 dark:text-zinc-500 group-hover/row:text-text-main shrink-0 mr-0.5 select-none">
-          {expanded ? <CaretDownIcon size={10} /> : <CaretRightIcon size={10} />}
+        <div className="w-3 h-3 flex items-center justify-center text-zinc-400 dark:text-zinc-500 group-hover/row:text-foreground shrink-0 mr-0.5 select-none">
+          {expanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
         </div>
         {renderKey()}
         <span className="text-zinc-400 dark:text-zinc-500 select-none">
           {openBracket}
           {!expanded && (
-            <span className="bg-layout-hover text-[9px] text-text-secondary px-1 py-0 mx-0.5 rounded-sm border border-layout-border/20">
+            <span className="bg-muted text-[9px] text-muted-foreground px-1 py-0 mx-0.5 rounded-sm border border-border/20">
               {collapsedPreview}
             </span>
           )}
@@ -194,7 +194,7 @@ function JsonNode({ name, value, depth, globalExpanded }: JsonNodeProps) {
                 name={key}
                 value={val}
                 depth={depth + 1}
-                globalExpanded={globalExpanded}
+                expandState={expandState}
               />
             )
           })}
@@ -211,25 +211,23 @@ function JsonNode({ name, value, depth, globalExpanded }: JsonNodeProps) {
   )
 }
 
-interface JsonViewerProps {
+interface MessageViewerProps {
   data: any
 }
 
-export function JsonViewer({ data }: JsonViewerProps) {
-  const [globalExpanded, setGlobalExpanded] = useState<boolean | null>(null)
+export function MessageViewer({ data }: MessageViewerProps) {
+  const [expandVersion, setExpandVersion] = useState(0)
+  const [expandState, setExpandState] = useState<'default' | 'expanded' | 'collapsed'>('default')
   const [copied, setCopied] = useState(false)
 
-  // Reset global expanded trigger if data changes
-  useEffect(() => {
-    setGlobalExpanded(null)
-  }, [data])
-
   const handleExpandAll = () => {
-    setGlobalExpanded(true)
+    setExpandState('expanded')
+    setExpandVersion(v => v + 1)
   }
 
   const handleCollapseAll = () => {
-    setGlobalExpanded(false)
+    setExpandState('collapsed')
+    setExpandVersion(v => v + 1)
   }
 
   const handleCopy = async () => {
@@ -244,38 +242,38 @@ export function JsonViewer({ data }: JsonViewerProps) {
   }
 
   return (
-    <div className="h-full flex flex-col bg-workbench rounded-none">
+    <div className="h-full flex flex-col bg-background rounded-none">
       {/* Control bar */}
-      <div className="flex items-center justify-between px-2.5 py-1 border-b border-layout-border/30 bg-titlebar/40 shrink-0 text-[9.5px]">
+      <div className="flex items-center justify-between px-2.5 py-1 border-b border-border bg-muted/20 shrink-0 text-[9.5px]">
         <div className="flex gap-2">
           <button
             onClick={handleExpandAll}
-            className="text-text-secondary hover:text-layout-primary font-mono cursor-pointer transition-colors"
+            className="text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors"
           >
             EXPAND ALL
           </button>
-          <span className="text-layout-border/50 font-mono">|</span>
+          <span className="text-border/50 font-mono">|</span>
           <button
             onClick={handleCollapseAll}
-            className="text-text-secondary hover:text-layout-primary font-mono cursor-pointer transition-colors"
+            className="text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors"
           >
             COLLAPSE ALL
           </button>
         </div>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 text-text-secondary hover:text-layout-primary font-mono cursor-pointer transition-colors"
+          className="flex items-center gap-1 text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors"
         >
           {copied
             ? (
                 <>
-                  <CheckIcon size={11} className="text-emerald-500" />
+                  <Check className="w-2.5 h-2.5 text-emerald-500" />
                   <span className="text-emerald-500 font-bold">COPIED!</span>
                 </>
               )
             : (
                 <>
-                  <CopyIcon size={11} />
+                  <Copy className="w-2.5 h-2.5" />
                   <span>COPY RAW</span>
                 </>
               )}
@@ -284,7 +282,7 @@ export function JsonViewer({ data }: JsonViewerProps) {
 
       {/* JSON content rendering body */}
       <div className="flex-1 overflow-auto p-2 font-mono select-text">
-        <JsonNode value={data} depth={0} globalExpanded={globalExpanded} />
+        <JsonNode key={expandVersion} value={data} depth={0} expandState={expandState} />
       </div>
     </div>
   )

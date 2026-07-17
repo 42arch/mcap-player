@@ -16,17 +16,15 @@ interface MainContentProps {
 }
 
 export default function MainContent({ darkMode }: MainContentProps) {
-  const {
-    fileSummary,
-    isLoading,
-    loadingMessage,
-    error,
-    setIsLoading,
-    setFileSummary,
-    setError,
-    activePanel,
-    setActivePanel,
-  } = usePlayerStore()
+  const fileSummary = usePlayerStore(state => state.fileSummary)
+  const isLoading = usePlayerStore(state => state.isLoading)
+  const loadingMessage = usePlayerStore(state => state.loadingMessage)
+  const error = usePlayerStore(state => state.error)
+  const setIsLoading = usePlayerStore(state => state.setIsLoading)
+  const setFileSummary = usePlayerStore(state => state.setFileSummary)
+  const setError = usePlayerStore(state => state.setError)
+  const activePanel = usePlayerStore(state => state.activePanel)
+  const setActivePanel = usePlayerStore(state => state.setActivePanel)
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]

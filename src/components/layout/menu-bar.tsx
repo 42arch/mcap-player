@@ -18,7 +18,8 @@ interface MenuBarProps {
 
 export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { setIsLoading, setError } = usePlayerStore()
+  const setIsLoading = usePlayerStore(state => state.setIsLoading)
+  const setError = usePlayerStore(state => state.setError)
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]

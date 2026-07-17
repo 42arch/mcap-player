@@ -5,10 +5,10 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
-import LeftSideBar from './left-side-bar'
 import MainContent from './main-content'
 import MenuBar from './menu-bar'
 import PlayBack from './play-back'
+import SideBar from './side-bar'
 
 export default function AppShell() {
   const { setTheme, resolvedTheme } = useTheme()
@@ -39,7 +39,7 @@ export default function AppShell() {
             <ResizablePanelGroup orientation="horizontal" className="flex-1">
               {/* Left Side Bar */}
               <ResizablePanel defaultSize="25%" minSize="20%" maxSize="30%" className="bg-card flex flex-col shrink-0">
-                <LeftSideBar />
+                <SideBar />
               </ResizablePanel>
 
               <ResizableHandle withHandle />

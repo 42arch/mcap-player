@@ -12,6 +12,46 @@ export class PlaybackController {
   private isQuerying = false
   private queryVersion = 0
 
+  constructor() {
+    if (typeof window !== 'undefined') {
+      let prevSubscribed = new Set<string>()
+      usePlayerStore.subscribe((state) => {
+        const currentSubscribed = state.subscribedTopics
+        const hasChanged = currentSubscribed.size !== prevSubscribed.size
+          || !Array.from(currentSubscribed).every(t => prevSubscribed.has(t))
+
+        if (hasChanged) {
+          prevSubscribed = new Set(currentSubscribed)
+          if (this.clock && !this.clock.getIsPlaying()) {
+            this.triggerBackfill()
+          }
+        }
+      })
+    }
+  }
+
+  triggerBackfill() {
+    if (!this.clock || !this.fileSummary) {
+      return
+    }
+    const ns = this.clock.get()
+    const subscribed = Array.from(usePlayerStore.getState().subscribedTopics)
+    const worker = this.getWorker()
+    if (subscribed.length > 0 && worker) {
+      this.queryVersion++
+      const version = this.queryVersion
+      const binaryFormat = usePlayerStore.getState().messagesSettings.binaryFormat
+      worker.getBackfillMessages(ns, subscribed, binaryFormat).then((messages: any[]) => {
+        if (version !== this.queryVersion) {
+          return
+        }
+        for (const msg of messages) {
+          globalMessageBus.publish(msg.topic, msg)
+        }
+      })
+    }
+  }
+
   private getWorker() {
     if (typeof window === 'undefined') {
       return null

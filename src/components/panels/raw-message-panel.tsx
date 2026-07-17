@@ -1,6 +1,6 @@
 import { Radio } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { JsonViewer } from '@/components/ui/json-viewer'
+import { MessageViewer } from '@/components/common/message-viewer'
 import {
   Select,
   SelectContent,
@@ -9,23 +9,32 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { globalMessageBus } from '@/core/message-bus'
+import { scheduleFrame } from '@/lib/raf-scheduler'
 import { formatBytes, formatNanoseconds } from '@/lib/time'
 import { usePlayerStore } from '@/stores/use-player-store'
 
-interface MessageViewerProps {
+interface RawMessageViewerProps {
   topic: string
   refreshRateHz: number
 }
 
-function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
+function RawMessageViewer({ topic, refreshRateHz }: RawMessageViewerProps) {
   const [msg, setMsg] = useState<any | null>(null)
+  const [showLoading, setShowLoading] = useState(false)
 
   useEffect(() => {
     // Clear message when topic changes to prevent showing stale data of previous topic
     setMsg(null)
+    setShowLoading(false)
+
+    // Debounce loading indicator to prevent flashing on fast backfills
+    const loadingTimer = setTimeout(() => {
+      setShowLoading(true)
+    }, 150)
 
     let latestMsg: any = null
     let hasNew = false
+    let cancelRaf: (() => void) | null = null
 
     // Listen to topic message bus
     const unsub = globalMessageBus.subscribe(topic, (newMsg) => {
@@ -37,7 +46,12 @@ function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
     const intervalMs = Math.round(1000 / refreshRateHz)
     const interval = setInterval(() => {
       if (hasNew) {
-        setMsg(latestMsg)
+        if (cancelRaf) {
+          cancelRaf()
+        }
+        cancelRaf = scheduleFrame(() => {
+          setMsg(latestMsg)
+        })
         hasNew = false
       }
     }, intervalMs)
@@ -45,10 +59,18 @@ function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
     return () => {
       unsub()
       clearInterval(interval)
+      clearTimeout(loadingTimer)
+      if (cancelRaf) {
+        cancelRaf()
+      }
     }
   }, [topic, refreshRateHz])
 
   if (!msg) {
+    if (!showLoading) {
+      return <div className="flex-1 bg-background" /> // Clean blank placeholder to prevent flickering
+    }
+
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-muted-foreground bg-background">
         <div className="relative flex items-center justify-center mb-3">
@@ -87,7 +109,7 @@ function MessageViewer({ topic, refreshRateHz }: MessageViewerProps) {
 
       {/* JSON Viewer fills the remaining container height */}
       <div className="flex-1 min-h-0 relative overflow-hidden bg-background">
-        <JsonViewer data={msg.payload} />
+        <MessageViewer data={msg.payload} />
       </div>
     </div>
   )
@@ -124,7 +146,8 @@ export default function RawMessagePanel() {
                 onValueChange={(val) => {
                   if (val) {
                     setSubscribedTopics(new Set([val]))
-                  } else {
+                  }
+                  else {
                     setSubscribedTopics(new Set())
                   }
                 }}
@@ -133,7 +156,7 @@ export default function RawMessagePanel() {
                   <SelectValue placeholder="Select topic..." />
                 </SelectTrigger>
                 <SelectContent position="popper" className="bg-popover text-popover-foreground">
-                  {channels.map((ch) => (
+                  {channels.map(ch => (
                     <SelectItem key={ch.id} value={ch.topic} className="font-mono text-[10px] py-1 h-6 min-h-0">
                       {ch.topic}
                     </SelectItem>
@@ -155,7 +178,7 @@ export default function RawMessagePanel() {
               </div>
             )
           : (
-              <MessageViewer topic={activeTopic} refreshRateHz={refreshRateHz} />
+              <RawMessageViewer topic={activeTopic} refreshRateHz={refreshRateHz} />
             )}
       </div>
     </div>

@@ -5,13 +5,11 @@ import RawMessageSetting from '@/components/panels/raw-message-setting'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { usePlayerStore } from '@/stores/use-player-store'
 
-export default function LeftSideBar() {
-  const {
-    activePanel,
-    fileSummary,
-    selectedTopic,
-    setSelectedTopic,
-  } = usePlayerStore()
+export default function SideBar() {
+  const activePanel = usePlayerStore(state => state.activePanel)
+  const fileSummary = usePlayerStore(state => state.fileSummary)
+  const selectedTopic = usePlayerStore(state => state.selectedTopic)
+  const setSelectedTopic = usePlayerStore(state => state.setSelectedTopic)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'topics' | 'settings'>('topics')
 
@@ -37,8 +35,6 @@ export default function LeftSideBar() {
       || (ch.schemaName
         && ch.schemaName.toLowerCase().includes(searchQuery.toLowerCase())),
   )
-
-
 
   const selectedChannel = fileSummary.channels.find(
     ch => ch.topic === selectedTopic,

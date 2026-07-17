@@ -1,11 +1,8 @@
 import { usePlayerStore } from '@/stores/use-player-store'
 
 export default function RawMessageSetting() {
-  const {
-    messagesSettings,
-    updateMessagesSettings,
-    fileSummary,
-  } = usePlayerStore()
+  const messagesSettings = usePlayerStore(state => state.messagesSettings)
+  const updateMessagesSettings = usePlayerStore(state => state.updateMessagesSettings)
 
   const hzOptions = [1, 5, 10, 15, 30, 60]
   const formatOptions = [
