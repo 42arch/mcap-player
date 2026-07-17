@@ -55,10 +55,14 @@ interface PlayerStore {
   selectedTopic: string | null
 
   // Panel settings
-  activePanel: 'overview' | 'messages'
+  activePanel: 'overview' | 'messages' | 'image'
   messagesSettings: {
     refreshRateHz: number
     binaryFormat: 'placeholder' | 'hex' | 'raw'
+  }
+  imageSettings: {
+    imageFit: 'contain' | 'cover' | 'fill'
+    brightness: number
   }
 
   setFileSummary: (summary: McapFileSummary | null) => void
@@ -71,8 +75,9 @@ interface PlayerStore {
   setSelectedTopic: (topic: string | null) => void
   toggleTopicSubscription: (topic: string) => void
   setSubscribedTopics: (topics: Set<string>) => void
-  setActivePanel: (panel: 'overview' | 'messages') => void
+  setActivePanel: (panel: 'overview' | 'messages' | 'image') => void
   updateMessagesSettings: (settings: Partial<PlayerStore['messagesSettings']>) => void
+  updateImageSettings: (settings: Partial<PlayerStore['imageSettings']>) => void
 }
 
 export const usePlayerStore = create<PlayerStore>(set => ({
@@ -92,6 +97,10 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   messagesSettings: {
     refreshRateHz: 15,
     binaryFormat: 'placeholder',
+  },
+  imageSettings: {
+    imageFit: 'contain',
+    brightness: 1.0,
   },
 
   setFileSummary: summary =>
@@ -134,5 +143,9 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   updateMessagesSettings: settings =>
     set(state => ({
       messagesSettings: { ...state.messagesSettings, ...settings },
+    })),
+  updateImageSettings: settings =>
+    set(state => ({
+      imageSettings: { ...state.imageSettings, ...settings },
     })),
 }))

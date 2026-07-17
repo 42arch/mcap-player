@@ -2,6 +2,7 @@ import { FileText, Info, Radio, Search } from 'lucide-react'
 import { useState } from 'react'
 import OverviewSetting from '@/components/panels/overview-setting'
 import RawMessageSetting from '@/components/panels/raw-message-setting'
+import ImageSetting from '@/components/panels/image-setting'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { usePlayerStore } from '@/stores/use-player-store'
 
@@ -194,9 +195,13 @@ export default function SideBar() {
           ? (
               <OverviewSetting />
             )
-          : (
-              <RawMessageSetting />
-            )}
+          : activePanel === 'image'
+            ? (
+                <ImageSetting />
+              )
+            : (
+                <RawMessageSetting />
+              )}
     </div>
   )
 }

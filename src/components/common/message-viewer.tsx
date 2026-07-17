@@ -117,11 +117,19 @@ function JsonNode({ name, value, depth, expandState }: JsonNodeProps) {
     )
   }
 
-  if (!isObject) {
+  const isBinary = ArrayBuffer.isView(value) || value instanceof ArrayBuffer
+
+  if (!isObject || isBinary) {
     let displayValue = String(value)
     let valueClass = 'text-zinc-800 dark:text-zinc-200'
 
-    if (typeof value === 'string') {
+    if (isBinary) {
+      const len = value instanceof ArrayBuffer ? value.byteLength : (value as any).byteLength
+      const typeName = value instanceof ArrayBuffer ? 'ArrayBuffer' : value.constructor.name
+      displayValue = `<${typeName}: ${len} bytes>`
+      valueClass = 'text-zinc-400 dark:text-zinc-500 font-semibold'
+    }
+    else if (typeof value === 'string') {
       displayValue = `"${value}"`
       valueClass = 'text-emerald-600 dark:text-emerald-400 break-all'
     }

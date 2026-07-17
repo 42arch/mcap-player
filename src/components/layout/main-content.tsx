@@ -1,6 +1,7 @@
 import { AlertCircle, ChevronDown, FileCode, LayoutGrid, Loader2 } from 'lucide-react'
 import OverviewPanel from '@/components/panels/overview-panel'
 import RawMessagePanel from '@/components/panels/raw-message-panel'
+import ImagePanel from '@/components/panels/image-panel'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -101,7 +102,9 @@ export default function MainContent({ darkMode }: MainContentProps) {
             <DropdownMenu>
               <DropdownMenuTrigger className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary text-secondary-foreground text-[10px] font-semibold rounded-md border border-border hover:bg-accent hover:text-accent-foreground active:scale-95 transition-all cursor-pointer outline-hidden mr-2">
                 <LayoutGrid className="w-3.5 h-3.5" />
-                {activePanel === 'overview' ? 'Overview & Schemas' : 'Raw Message View'}
+                {activePanel === 'overview' && 'Overview & Schemas'}
+                {activePanel === 'messages' && 'Raw Message View'}
+                {activePanel === 'image' && 'Camera Image View'}
                 <ChevronDown className="w-3.5 h-3.5 opacity-60" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-popover border border-border rounded-lg text-[10px] p-1 text-popover-foreground min-w-40 shadow-md z-50">
@@ -121,6 +124,14 @@ export default function MainContent({ darkMode }: MainContentProps) {
                 >
                   Raw Message View
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActivePanel('image')}
+                  className={`focus:bg-accent focus:text-accent-foreground py-1.5 px-2 rounded-md cursor-pointer ${
+                    activePanel === 'image' ? 'bg-muted font-bold' : ''
+                  }`}
+                >
+                  Camera Image View
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -134,15 +145,10 @@ export default function MainContent({ darkMode }: MainContentProps) {
         </div>
       </div>
 
-      {/* Main Workspace Layout depends on Panel Selection */}
       <div className="flex-1 min-h-0 flex flex-col">
-        {activePanel === 'overview'
-          ? (
-              <OverviewPanel fileSummary={fileSummary} />
-            )
-          : (
-              <RawMessagePanel />
-            )}
+        {activePanel === 'overview' && <OverviewPanel fileSummary={fileSummary} />}
+        {activePanel === 'messages' && <RawMessagePanel />}
+        {activePanel === 'image' && <ImagePanel />}
       </div>
     </div>
   )

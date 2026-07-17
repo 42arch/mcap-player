@@ -1,3 +1,10 @@
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { usePlayerStore } from '@/stores/use-player-store'
 
 export default function RawMessageSetting() {
@@ -20,26 +27,23 @@ export default function RawMessageSetting() {
           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
             UI Refresh Rate
           </label>
-          <div className="grid grid-cols-3 gap-1.5">
-            {hzOptions.map((hz) => {
-              const isActive = messagesSettings.refreshRateHz === hz
-              return (
-                <button
-                  key={hz}
-                  onClick={() => updateMessagesSettings({ refreshRateHz: hz })}
-                  className={`py-1.5 text-[10px] font-mono font-semibold rounded-md border transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-primary border-primary text-primary-foreground shadow-xs font-bold'
-                      : 'bg-background border-border text-muted-foreground hover:text-foreground hover:bg-accent/40'
-                  }`}
-                >
+          <Select
+            value={String(messagesSettings.refreshRateHz)}
+            onValueChange={val => updateMessagesSettings({ refreshRateHz: Number(val) })}
+          >
+            <SelectTrigger className="w-full bg-background border-border text-[11px] h-8 px-2 font-mono">
+              <SelectValue placeholder="Select refresh rate..." />
+            </SelectTrigger>
+            <SelectContent position="popper" className="bg-popover text-popover-foreground">
+              {hzOptions.map(hz => (
+                <SelectItem key={hz} value={String(hz)} className="font-mono text-[11px] py-1 h-8">
                   {hz}
                   {' '}
                   Hz
-                </button>
-              )
-            })}
-          </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <span className="text-[9px] text-muted-foreground/60 block leading-tight">
             Limits the rendering frequency of the log rows to save CPU cycles.
           </span>
@@ -50,27 +54,26 @@ export default function RawMessageSetting() {
           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
             Binary Byte Array Format
           </label>
-          <div className="space-y-2">
-            {formatOptions.map((opt) => {
-              const isActive = messagesSettings.binaryFormat === opt.value
-              return (
-                <button
-                  key={opt.value}
-                  onClick={() => updateMessagesSettings({ binaryFormat: opt.value })}
-                  className={`w-full text-left p-2.5 rounded-lg border transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-accent/40 border-border/80 text-foreground font-semibold shadow-inner'
-                      : 'bg-background border-border/40 text-muted-foreground hover:text-foreground hover:bg-accent/10'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-foreground">{opt.label}</span>
+          <Select
+            value={messagesSettings.binaryFormat}
+            onValueChange={val => updateMessagesSettings({ binaryFormat: val as any })}
+          >
+            <SelectTrigger className="w-full bg-background border-border text-[11px] h-8 px-2">
+              <span>
+                {formatOptions.find(o => o.value === messagesSettings.binaryFormat)?.label || 'Select binary format...'}
+              </span>
+            </SelectTrigger>
+            <SelectContent position="popper" className="bg-popover text-popover-foreground">
+              {formatOptions.map(opt => (
+                <SelectItem key={opt.value} value={opt.value} className="text-[11px] py-1.5 min-h-8">
+                  <div className="flex flex-col items-start leading-tight">
+                    <span className="font-medium text-[11px] text-foreground">{opt.label}</span>
                     <span className="text-[9px] text-muted-foreground/60">{opt.desc}</span>
                   </div>
-                </button>
-              )
-            })}
-          </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
       </div>

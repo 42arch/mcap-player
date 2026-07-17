@@ -51,9 +51,17 @@ function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw'
   }
 
   if (typeof value === 'object') {
+    const isImage = value.width !== undefined && value.height !== undefined && value.encoding !== undefined && value.data !== undefined
+    const isCompressedImage = value.format !== undefined && value.data !== undefined
+
     const res: any = {}
     for (const k of Object.keys(value)) {
-      res[k] = sanitizePayload(value[k], binaryFormat)
+      if ((isImage || isCompressedImage) && k === 'data') {
+        res[k] = value[k]
+      }
+      else {
+        res[k] = sanitizePayload(value[k], binaryFormat)
+      }
     }
     return res
   }
