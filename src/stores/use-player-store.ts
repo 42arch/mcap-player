@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid'
 import { create } from 'zustand'
 
 export interface McapChannel {
@@ -39,6 +40,16 @@ export interface McapFileSummary {
   endNs: bigint
 }
 
+export interface PlotSeries {
+  id: string
+  name: string
+  topic: string
+  path: string
+  lineStyle: 'solid' | 'dashed'
+  lineWidth: number
+  color: string
+}
+
 interface PlayerStore {
   fileSummary: McapFileSummary | null
   isLoading: boolean
@@ -55,7 +66,7 @@ interface PlayerStore {
   selectedTopic: string | null
 
   // Panel settings
-  activePanel: 'overview' | 'messages' | 'image'
+  activePanel: 'overview' | 'messages' | 'image' | 'plot'
   messagesSettings: {
     refreshRateHz: number
     binaryFormat: 'placeholder' | 'hex' | 'raw'
@@ -64,6 +75,11 @@ interface PlayerStore {
     imageFit: 'contain' | 'cover' | 'fill'
     brightness: number
   }
+  plotSettings: {
+    windowSizeSeconds: number
+  }
+  plotSeries: PlotSeries[]
+  availablePlotFields: Record<string, string[]>
 
   setFileSummary: (summary: McapFileSummary | null) => void
   setIsLoading: (loading: boolean, message?: string) => void
@@ -75,9 +91,16 @@ interface PlayerStore {
   setSelectedTopic: (topic: string | null) => void
   toggleTopicSubscription: (topic: string) => void
   setSubscribedTopics: (topics: Set<string>) => void
-  setActivePanel: (panel: 'overview' | 'messages' | 'image') => void
+  setActivePanel: (panel: 'overview' | 'messages' | 'image' | 'plot') => void
   updateMessagesSettings: (settings: Partial<PlayerStore['messagesSettings']>) => void
   updateImageSettings: (settings: Partial<PlayerStore['imageSettings']>) => void
+  updatePlotSettings: (settings: Partial<PlayerStore['plotSettings']>) => void
+
+  // Plot series actions
+  addPlotSeries: () => void
+  removePlotSeries: (id: string) => void
+  updatePlotSeries: (id: string, updates: Partial<PlotSeries>) => void
+  setAvailablePlotFieldsForTopic: (topic: string, fields: string[]) => void
 }
 
 export const usePlayerStore = create<PlayerStore>(set => ({
@@ -102,6 +125,11 @@ export const usePlayerStore = create<PlayerStore>(set => ({
     imageFit: 'contain',
     brightness: 1.0,
   },
+  plotSettings: {
+    windowSizeSeconds: 15,
+  },
+  plotSeries: [],
+  availablePlotFields: {},
 
   setFileSummary: summary =>
     set({
@@ -113,6 +141,21 @@ export const usePlayerStore = create<PlayerStore>(set => ({
       subscribedTopics: new Set<string>(),
       selectedTopic: null,
       activePanel: 'overview',
+      plotSettings: {
+        windowSizeSeconds: 15,
+      },
+      plotSeries: [
+        {
+          id: 'default-series',
+          name: 'Series 1',
+          topic: '',
+          path: '',
+          lineStyle: 'solid',
+          lineWidth: 2,
+          color: '#3b82f6',
+        },
+      ],
+      availablePlotFields: {},
     }),
   setIsLoading: (loading, message = '') =>
     set({ isLoading: loading, loadingMessage: message }),
@@ -124,20 +167,18 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   setSelectedTopic: topic => set({ selectedTopic: topic }),
   toggleTopicSubscription: topic =>
     set((state) => {
-      const next = new Set<string>()
-      if (!state.subscribedTopics.has(topic)) {
+      const next = new Set(state.subscribedTopics)
+      if (next.has(topic)) {
+        next.delete(topic)
+      }
+      else {
         next.add(topic)
       }
       return { subscribedTopics: next }
     }),
   setSubscribedTopics: topics =>
     set(() => {
-      const next = new Set<string>()
-      if (topics.size > 0) {
-        const first = Array.from(topics)[0]
-        next.add(first)
-      }
-      return { subscribedTopics: next }
+      return { subscribedTopics: new Set(topics) }
     }),
   setActivePanel: panel => set({ activePanel: panel }),
   updateMessagesSettings: settings =>
@@ -147,5 +188,39 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   updateImageSettings: settings =>
     set(state => ({
       imageSettings: { ...state.imageSettings, ...settings },
+    })),
+  updatePlotSettings: settings =>
+    set(state => ({
+      plotSettings: { ...state.plotSettings, ...settings },
+    })),
+
+  addPlotSeries: () =>
+    set((state) => {
+      const nextIndex = state.plotSeries.length + 1
+      const palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+      const color = palette[(nextIndex - 1) % palette.length]
+
+      const newSeries: PlotSeries = {
+        id: nanoid(),
+        name: `Series ${nextIndex}`,
+        topic: '',
+        path: '',
+        lineStyle: 'solid',
+        lineWidth: 2,
+        color,
+      }
+      return { plotSeries: [...state.plotSeries, newSeries] }
+    }),
+  removePlotSeries: id =>
+    set(state => ({
+      plotSeries: state.plotSeries.filter(s => s.id !== id),
+    })),
+  updatePlotSeries: (id, updates) =>
+    set(state => ({
+      plotSeries: state.plotSeries.map(s => (s.id === id ? { ...s, ...updates } : s)),
+    })),
+  setAvailablePlotFieldsForTopic: (topic, fields) =>
+    set(state => ({
+      availablePlotFields: { ...state.availablePlotFields, [topic]: fields },
     })),
 }))

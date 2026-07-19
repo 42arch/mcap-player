@@ -2,6 +2,7 @@ import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'
 import { expose } from 'comlink'
+import { getValueByPath } from '../../lib/value-extractor'
 import { MessageCursor } from './message-cursor'
 
 class McapWorker {
@@ -153,6 +154,67 @@ class McapWorker {
     this.lastEndTimeNs = seekTimeNs + 1n // Next tick query should start contiguous with backfill end
 
     return this.cursor.getBackfillMessages(seekTimeNs, topics, binaryFormat)
+  }
+
+  async getFirstMessagePayload(topic: string) {
+    if (!this.reader) {
+      return null
+    }
+    const channel = Array.from(this.reader.channelsById.values()).find(ch => ch.topic === topic)
+    if (!channel) {
+      return null
+    }
+
+    const deserialize = this.cursor.getDeserializer(channel.id)
+    const iterator = this.reader.readMessages({
+      topics: [topic],
+    })
+
+    const next = await iterator.next()
+    if (next.done) {
+      return null
+    }
+
+    try {
+      return deserialize(next.value.data)
+    }
+    catch {
+      return null
+    }
+  }
+
+  async getTopicFieldValues(topic: string, path: string, startNs: bigint) {
+    if (!this.reader) {
+      return { times: [], values: [] }
+    }
+    const channel = Array.from(this.reader.channelsById.values()).find(ch => ch.topic === topic)
+    if (!channel) {
+      return { times: [], values: [] }
+    }
+
+    const deserialize = this.cursor.getDeserializer(channel.id)
+    const times: number[] = []
+    const values: number[] = []
+
+    const iterator = this.reader.readMessages({
+      topics: [topic],
+    })
+
+    for await (const msg of iterator) {
+      try {
+        const payload = deserialize(msg.data)
+        const val = getValueByPath(payload, path)
+        if (val !== null) {
+          times.push(Number(msg.logTime - startNs) / 1e9)
+          values.push(val)
+        }
+      }
+      catch {
+        // Skip bad packets
+      }
+    }
+
+    return { times, values }
   }
 }
 

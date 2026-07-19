@@ -209,6 +209,22 @@ export class PlaybackController {
       this.animationFrameId = null
     }
   }
+
+  async getFirstMessagePayload(topic: string) {
+    const worker = this.getWorker()
+    if (!worker) {
+      return null
+    }
+    return worker.getFirstMessagePayload(topic)
+  }
+
+  async getTopicFieldValues(topic: string, path: string, startNs: bigint) {
+    const worker = this.getWorker()
+    if (!worker) {
+      return { times: [], values: [] }
+    }
+    return worker.getTopicFieldValues(topic, path, startNs)
+  }
 }
 
 export const globalPlaybackController = new PlaybackController()

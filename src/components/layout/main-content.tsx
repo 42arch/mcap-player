@@ -2,6 +2,7 @@ import { AlertCircle, ChevronDown, FileCode, LayoutGrid, Loader2 } from 'lucide-
 import OverviewPanel from '@/components/panels/overview-panel'
 import RawMessagePanel from '@/components/panels/raw-message-panel'
 import ImagePanel from '@/components/panels/image-panel'
+import PlotPanel from '@/components/panels/plot-panel'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -105,6 +106,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
                 {activePanel === 'overview' && 'Overview & Schemas'}
                 {activePanel === 'messages' && 'Raw Message View'}
                 {activePanel === 'image' && 'Camera Image View'}
+                {activePanel === 'plot' && 'Plot Visualizer'}
                 <ChevronDown className="w-3.5 h-3.5 opacity-60" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-popover border border-border rounded-lg text-[10px] p-1 text-popover-foreground min-w-40 shadow-md z-50">
@@ -132,6 +134,14 @@ export default function MainContent({ darkMode }: MainContentProps) {
                 >
                   Camera Image View
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActivePanel('plot')}
+                  className={`focus:bg-accent focus:text-accent-foreground py-1.5 px-2 rounded-md cursor-pointer ${
+                    activePanel === 'plot' ? 'bg-muted font-bold' : ''
+                  }`}
+                >
+                  Plot Visualizer
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -149,6 +159,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
         {activePanel === 'overview' && <OverviewPanel fileSummary={fileSummary} />}
         {activePanel === 'messages' && <RawMessagePanel />}
         {activePanel === 'image' && <ImagePanel />}
+        {activePanel === 'plot' && <PlotPanel />}
       </div>
     </div>
   )
