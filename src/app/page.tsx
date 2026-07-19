@@ -1,10 +1,6 @@
 'use client'
 
-import AppShell from '@/components/layout/AppShell'
-import { registerAllPanels } from '@/components/panels/register-panels'
-
-// Register all panels at module level
-registerAllPanels()
+import AppShell from '@/components/layout/app-shell'
 
 export default function Home() {
   return <AppShell />

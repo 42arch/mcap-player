@@ -33,6 +33,7 @@
 * **双引号 (Double Quotes) in JSX**: TSX/JSX 属性值使用双引号 `"`。
 * **2 空格缩进 (2-Space Indent)**: 所有代码文件强制使用 2 个空格进行缩进。
 * **尾随逗号 (Trailing Commas)**: 多行对象、数组、导入或参数声明的末尾应保留逗号。
+* **文件命名规范 (File Naming)**: 项目中的所有源文件和文件夹强制使用 kebab-case 命名规范（例如：`playback-controller.ts`、`raw-message-stream.tsx`），禁止使用 PascalCase 或 camelCase。
 
 ### TypeScript 规范
 * **严禁滥用 `any`**: 必须声明明确的 TypeScript 类型或接口（使用 `interface` 或 `type`）。
@@ -42,9 +43,6 @@
 ### React 与组件规范
 * **禁止默认导入 React**: 禁止使用 `import React from 'react'` 以及 `React.useState` 等类似方式。必须使用具体的命名导入，如 `import { useState } from 'react'`。
 * **无需重复声明 'use client'**: 由于入口页面 `src/app/page.tsx` 已声明 `'use client'`，其下导入的所有子组件均默认运行在客户端环境，无需刻意做客户端与服务端组件的强拆分。在编写新组件时，**无需**声明 `'use client'` 指令，因为它们会自动继承自入口组件的客户端环境。
-
-### 图标库使用规范
-* **Phosphor Icons 导入**: `@phosphor-icons/react` 的图标导入已被标记为过时（例如 `import { Cpu } from '@phosphor-icons/react'`），必须统一使用带有 `Icon` 后缀的形式（例如 `import { CpuIcon } from '@phosphor-icons/react'`，使用时作为 `<CpuIcon />`）。
 
 ### CSS & UI规范
 * 优先使用 Tailwind CSS 类名进行布局与样式设计。
@@ -61,4 +59,5 @@
 2. **保留注释**: 修改代码时，必须保留原有文件中不相关的注释、文档声明 (JSDoc) 和原有的逻辑结构，除非任务明确要求修改它们。
 3. **保持回答简练**: 回复应直奔主题，避免口水话和对代码改动的超长重复复述。
 4. **先方案后代码**: 在编写或修改代码前，必须先在回复中明确并输出具体的实现方案（无需等待用户二次确认），随后直接执行代码修改，并在修改完成后进行简短的总结。
-
+5. **按需执行验证**: 代码修改完成后，除非用户明确指示，禁止自动执行 `pnpm build`、`pnpm lint`、`pnpm exec tsc` 等可能较为耗时的构建与校验命令。
+6. **中文计划与轻量协作**: 任何任务计划或任务列表文档必须使用中文编写。对于简单的微调或低风险的微小需求，可以直接修改代码，无需编写繁杂的实现方案文档。
