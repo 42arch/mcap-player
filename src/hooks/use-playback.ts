@@ -54,11 +54,29 @@ export function usePlaybackControls() {
     globalPlaybackController.setSpeed(speed)
   }
 
+  const stepBackward = (seconds = 5) => {
+    if (!fileSummary) {
+      return
+    }
+    const target = Math.max(0, elapsedSeconds - seconds)
+    seekTo(target)
+  }
+
+  const stepForward = (seconds = 5) => {
+    if (!fileSummary) {
+      return
+    }
+    const target = Math.min(durationSeconds, elapsedSeconds + seconds)
+    seekTo(target)
+  }
+
   return {
     isPlaying,
     setIsPlaying,
     scrubTo: seekTo,
     seekTo,
+    stepBackward,
+    stepForward,
     setPlaybackSpeed,
     playbackSpeed,
     elapsedSeconds,

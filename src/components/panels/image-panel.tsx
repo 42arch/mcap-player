@@ -8,21 +8,19 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { globalMessageBus } from '@/core/message-bus'
+import { isH264Format, processH264Frame } from '@/lib/h264'
 import { scheduleFrame } from '@/lib/raf-scheduler'
 import { cn } from '@/lib/utils'
 import { usePlayerStore } from '@/stores/use-player-store'
 
 interface ImageViewerProps {
   topic: string
-  refreshRateHz: number
   imageFit: 'contain' | 'cover' | 'fill'
   brightness: number
 }
 
-function ImageViewer({ topic, refreshRateHz, imageFit, brightness }: ImageViewerProps) {
+function ImageViewer({ topic, imageFit, brightness }: ImageViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const imgRef = useRef<HTMLImageElement>(null)
-  const [renderType, setRenderType] = useState<'canvas' | 'img' | null>(null)
   const [showLoading, setShowLoading] = useState(false)
   const [msgReceived, setMsgReceived] = useState(false)
 
@@ -35,125 +33,239 @@ function ImageViewer({ topic, refreshRateHz, imageFit, brightness }: ImageViewer
       setShowLoading(true)
     }, 150)
 
-    let latestMsg: any = null
-    let hasNew = false
     let cancelRaf: (() => void) | null = null
-    let objectUrlToRevoke: string | null = null
+    let videoDecoder: VideoDecoder | null = null
+    let hasSeenKeyframe = false
+    let cachedSpsPps: Uint8Array | null = null
+    const msgQueue: any[] = []
+    let isScheduled = false
 
-    const unsub = globalMessageBus.subscribe(topic, (newMsg) => {
-      latestMsg = newMsg
-      hasNew = true
-    })
+    const initVideoDecoder = () => {
+      if (typeof window === 'undefined' || !('VideoDecoder' in window)) {
+        console.warn('WebCodecs VideoDecoder is not supported in this browser environment.')
+        return null
+      }
 
-    const intervalMs = Math.round(1000 / refreshRateHz)
-    const interval = setInterval(() => {
-      if (hasNew) {
-        const msg = latestMsg
-        hasNew = false
-        setMsgReceived(true)
-
-        if (cancelRaf) {
-          cancelRaf()
-        }
-
-        cancelRaf = scheduleFrame(() => {
-          const payload = msg.payload
-          if (!payload)
-            return
-
-          // Determine if compressed or raw
-          const isCompressed = payload.format !== undefined && payload.data !== undefined
-
-          if (isCompressed) {
-            setRenderType('img')
-            if (imgRef.current) {
-              const uint8 = payload.data instanceof Uint8Array
-                ? payload.data
-                : new Uint8Array(payload.data)
-
-              const formatVal = String(payload.format).split(';')[0]
-              const blob = new Blob([uint8], { type: `image/${formatVal}` })
-              const url = URL.createObjectURL(blob)
-
-              imgRef.current.src = url
-
-              if (objectUrlToRevoke) {
-                URL.revokeObjectURL(objectUrlToRevoke)
-              }
-              objectUrlToRevoke = url
-            }
-          }
-          else if (payload.width !== undefined && payload.height !== undefined && payload.data !== undefined) {
-            setRenderType('canvas')
+      try {
+        hasSeenKeyframe = false
+        const decoder = new VideoDecoder({
+          output: (frame: VideoFrame) => {
             if (canvasRef.current) {
               const canvas = canvasRef.current
+              if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+                canvas.width = frame.displayWidth
+                canvas.height = frame.displayHeight
+              }
               const ctx = canvas.getContext('2d')
               if (ctx) {
-                const { width, height, encoding, data } = payload
-                canvas.width = width
-                canvas.height = height
+                ctx.drawImage(frame, 0, 0, canvas.width, canvas.height)
+              }
+            }
+            frame.close()
+          },
+          error: (err) => {
+            console.error('VideoDecoder runtime error:', err)
+          },
+        })
 
-                const imageData = ctx.createImageData(width, height)
-                const rgba = imageData.data
-                const uint8 = data instanceof Uint8Array ? data : new Uint8Array(data)
+        const codecsToTry = ['avc1.42E01E', 'avc1.4D401E', 'avc1.64001E']
+        for (const codec of codecsToTry) {
+          try {
+            decoder.configure({ codec, optimizeForLatency: true })
+            break
+          }
+          catch {
+            // Try next codec profile if unsupported
+          }
+        }
 
-                if (encoding === 'rgb8') {
-                  for (let i = 0, j = 0; i < uint8.length; i += 3, j += 4) {
-                    rgba[j] = uint8[i]
-                    rgba[j + 1] = uint8[i + 1]
-                    rgba[j + 2] = uint8[i + 2]
-                    rgba[j + 3] = 255
-                  }
-                }
-                else if (encoding === 'bgr8') {
-                  for (let i = 0, j = 0; i < uint8.length; i += 3, j += 4) {
-                    rgba[j] = uint8[i + 2]
-                    rgba[j + 1] = uint8[i + 1]
-                    rgba[j + 2] = uint8[i]
-                    rgba[j + 3] = 255
-                  }
-                }
-                else if (encoding === 'mono8') {
-                  for (let i = 0, j = 0; i < uint8.length; i++, j += 4) {
-                    const val = uint8[i]
-                    rgba[j] = val
-                    rgba[j + 1] = val
-                    rgba[j + 2] = val
-                    rgba[j + 3] = 255
-                  }
-                }
-                else if (encoding === 'rgba8' || encoding === 'rgba') {
-                  rgba.set(uint8)
-                }
-                else if (encoding === 'bgra8' || encoding === 'bgra') {
-                  for (let i = 0, j = 0; i < uint8.length; i += 4, j += 4) {
-                    rgba[j] = uint8[i + 2]
-                    rgba[j + 1] = uint8[i + 1]
-                    rgba[j + 2] = uint8[i]
-                    rgba[j + 3] = uint8[i + 3]
-                  }
-                }
+        return decoder
+      }
+      catch (e) {
+        console.error('Failed to initialize VideoDecoder:', e)
+        return null
+      }
+    }
 
-                ctx.putImageData(imageData, 0, 0)
+    const unsubSeek = globalMessageBus.subscribe('__seek__', () => {
+      msgQueue.length = 0
+      if (videoDecoder && videoDecoder.state === 'configured') {
+        try {
+          videoDecoder.reset()
+          videoDecoder.configure({ codec: 'avc1.42E01E', optimizeForLatency: true })
+          hasSeenKeyframe = false
+        }
+        catch (e) {
+          console.error('Error resetting VideoDecoder on seek:', e)
+        }
+      }
+    })
+
+    const processQueue = () => {
+      isScheduled = false
+      while (msgQueue.length > 0) {
+        const newMsg = msgQueue.shift()
+        const payload = newMsg.payload
+        if (!payload)
+          continue
+
+        const isCompressed = payload.format !== undefined && payload.data !== undefined
+
+        if (isCompressed) {
+          const isH264 = isH264Format(payload.format)
+
+          const uint8 = payload.data instanceof Uint8Array
+            ? payload.data
+            : new Uint8Array(payload.data)
+
+          if (isH264) {
+            if (!videoDecoder || videoDecoder.state === 'closed') {
+              videoDecoder = initVideoDecoder()
+            }
+
+            if (videoDecoder && videoDecoder.state === 'configured') {
+              const { bytes: parsedBytes, isKeyframe, spsPps } = processH264Frame(uint8)
+              let bytes = parsedBytes
+
+              if (spsPps) {
+                cachedSpsPps = spsPps
+              }
+
+              if (!hasSeenKeyframe) {
+                if (!isKeyframe) {
+                  continue
+                }
+                hasSeenKeyframe = true
+                if (!spsPps && cachedSpsPps) {
+                  const combined = new Uint8Array(cachedSpsPps.length + bytes.length)
+                  combined.set(cachedSpsPps, 0)
+                  combined.set(bytes, cachedSpsPps.length)
+                  bytes = combined
+                }
+              }
+
+              try {
+                const chunk = new EncodedVideoChunk({
+                  type: isKeyframe ? 'key' : 'delta',
+                  timestamp: Number(newMsg.logTime / 1000n),
+                  data: bytes,
+                })
+                videoDecoder.decode(chunk)
+              }
+              catch (err) {
+                console.error('Error decoding H.264 video chunk:', err)
               }
             }
           }
+          else {
+            // Render standard compressed formats (JPEG, PNG, WebP) on Canvas via createImageBitmap
+            const formatVal = String(payload.format || 'jpeg').split(';')[0].toLowerCase().trim()
+            const blob = new Blob([uint8], { type: `image/${formatVal}` })
+            createImageBitmap(blob).then((bitmap) => {
+              if (canvasRef.current) {
+                const canvas = canvasRef.current
+                if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                  canvas.width = bitmap.width
+                  canvas.height = bitmap.height
+                }
+                const ctx = canvas.getContext('2d')
+                if (ctx) {
+                  ctx.drawImage(bitmap, 0, 0)
+                }
+              }
+              bitmap.close()
+            }).catch((err) => {
+              console.error('Error decoding compressed image bitmap:', err)
+            })
+          }
+        }
+        else if (payload.width !== undefined && payload.height !== undefined && payload.data !== undefined) {
+          if (canvasRef.current) {
+            const canvas = canvasRef.current
+            const ctx = canvas.getContext('2d')
+            if (ctx) {
+              const { width, height, encoding, data } = payload
+              canvas.width = width
+              canvas.height = height
+
+              const imageData = ctx.createImageData(width, height)
+              const rgba = imageData.data
+              const uint8 = data instanceof Uint8Array ? data : new Uint8Array(data)
+
+              if (encoding === 'rgb8') {
+                for (let i = 0, j = 0; i < uint8.length; i += 3, j += 4) {
+                  rgba[j] = uint8[i]
+                  rgba[j + 1] = uint8[i + 1]
+                  rgba[j + 2] = uint8[i + 2]
+                  rgba[j + 3] = 255
+                }
+              }
+              else if (encoding === 'bgr8') {
+                for (let i = 0, j = 0; i < uint8.length; i += 3, j += 4) {
+                  rgba[j] = uint8[i + 2]
+                  rgba[j + 1] = uint8[i + 1]
+                  rgba[j + 2] = uint8[i]
+                  rgba[j + 3] = 255
+                }
+              }
+              else if (encoding === 'mono8') {
+                for (let i = 0, j = 0; i < uint8.length; i++, j += 4) {
+                  const val = uint8[i]
+                  rgba[j] = val
+                  rgba[j + 1] = val
+                  rgba[j + 2] = val
+                  rgba[j + 3] = 255
+                }
+              }
+              else if (encoding === 'rgba8' || encoding === 'rgba') {
+                rgba.set(uint8)
+              }
+              else if (encoding === 'bgra8' || encoding === 'bgra') {
+                for (let i = 0, j = 0; i < uint8.length; i += 4, j += 4) {
+                  rgba[j] = uint8[i + 2]
+                  rgba[j + 1] = uint8[i + 1]
+                  rgba[j + 2] = uint8[i]
+                  rgba[j + 3] = uint8[i + 3]
+                }
+              }
+
+              ctx.putImageData(imageData, 0, 0)
+            }
+          }
+        }
+      }
+    }
+
+    const unsub = globalMessageBus.subscribe(topic, (newMsg) => {
+      setMsgReceived(true)
+      msgQueue.push(newMsg)
+
+      if (!isScheduled) {
+        isScheduled = true
+        cancelRaf = scheduleFrame(() => {
+          processQueue()
         })
       }
-    }, intervalMs)
+    })
 
     return () => {
       unsub()
-      clearInterval(interval)
+      unsubSeek()
       clearTimeout(timer)
       if (cancelRaf) {
         cancelRaf()
       }
-      if (objectUrlToRevoke) {
-        URL.revokeObjectURL(objectUrlToRevoke)
+      if (videoDecoder) {
+        if (videoDecoder.state !== 'closed') {
+          try {
+            videoDecoder.close()
+          }
+          catch {}
+        }
+        videoDecoder = null
       }
     }
-  }, [topic, refreshRateHz])
+  }, [topic])
 
   if (!msgReceived) {
     if (!showLoading) {
@@ -180,18 +292,6 @@ function ImageViewer({ topic, refreshRateHz, imageFit, brightness }: ImageViewer
       <canvas
         ref={canvasRef}
         className={cn(
-          renderType !== 'canvas' && 'hidden',
-          imageFit === 'contain' && 'max-w-full max-h-full object-contain',
-          imageFit === 'cover' && 'w-full h-full object-cover',
-          imageFit === 'fill' && 'w-full h-full object-fill',
-          '[filter:brightness(var(--image-brightness))]',
-        )}
-      />
-      <img
-        ref={imgRef}
-        alt="camera frame"
-        className={cn(
-          renderType !== 'img' && 'hidden',
           imageFit === 'contain' && 'max-w-full max-h-full object-contain',
           imageFit === 'cover' && 'w-full h-full object-cover',
           imageFit === 'fill' && 'w-full h-full object-fill',
@@ -206,7 +306,6 @@ export default function ImagePanel() {
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const setSubscribedTopics = usePlayerStore(state => state.setSubscribedTopics)
   const subscribedTopics = usePlayerStore(state => state.subscribedTopics)
-  const refreshRateHz = usePlayerStore(state => state.messagesSettings.refreshRateHz)
   const imageFit = usePlayerStore(state => state.imageSettings.imageFit)
   const brightness = usePlayerStore(state => state.imageSettings.brightness)
   const activeTopic = Array.from(subscribedTopics)[0]
@@ -216,7 +315,7 @@ export default function ImagePanel() {
     if (!ch.schemaName)
       return false
     const lower = ch.schemaName.toLowerCase()
-    return lower.includes('image')
+    return lower.includes('image') || lower.includes('video') || lower.includes('compressed')
   })
 
   return (
@@ -282,9 +381,11 @@ export default function ImagePanel() {
                   </div>
                 )
               : (
-                  <ImageViewer topic={activeTopic} refreshRateHz={refreshRateHz} imageFit={imageFit} brightness={brightness} />
+                  <ImageViewer topic={activeTopic} imageFit={imageFit} brightness={brightness} />
                 )}
       </div>
     </div>
   )
 }
+
+

@@ -3,6 +3,15 @@ import { usePlayerStore } from '@/stores/use-player-store'
 import { globalMessageBus } from './message-bus'
 import { PlaybackClock } from './playback-clock'
 
+export type DispatchMode = 'latest' | 'all'
+
+export const PANEL_DISPATCH_MODES: Record<string, DispatchMode> = {
+  image: 'latest',
+  overview: 'all',
+  messages: 'all',
+  plot: 'all',
+}
+
 export class PlaybackController {
   private worker: any = null
   private clock: PlaybackClock | null = null
@@ -180,8 +189,23 @@ export class PlaybackController {
                 return
               }
               this.lastTickTimeNs = queryEnd
-              for (const msg of messages) {
-                globalMessageBus.publish(msg.topic, msg)
+
+              const activePanel = usePlayerStore.getState().activePanel
+              const dispatchMode = PANEL_DISPATCH_MODES[activePanel] ?? 'all'
+
+              if (dispatchMode === 'latest') {
+                const latestMap = new Map<string, any>()
+                for (const msg of messages) {
+                  latestMap.set(msg.topic, msg)
+                }
+                for (const msg of latestMap.values()) {
+                  globalMessageBus.publish(msg.topic, msg)
+                }
+              }
+              else {
+                for (const msg of messages) {
+                  globalMessageBus.publish(msg.topic, msg)
+                }
               }
             })
             .catch((err: any) => {

@@ -1,20 +1,11 @@
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { usePlayerStore } from '@/stores/use-player-store'
 
 export default function ImageSetting() {
-  const messagesSettings = usePlayerStore(state => state.messagesSettings)
-  const updateMessagesSettings = usePlayerStore(state => state.updateMessagesSettings)
   const imageSettings = usePlayerStore(state => state.imageSettings)
   const updateImageSettings = usePlayerStore(state => state.updateImageSettings)
 
-  const hzOptions = [1, 5, 10, 15, 30, 60]
   const fitOptions = [
     { value: 'contain', label: 'Contain', desc: 'Fit image fully inside container' },
     { value: 'cover', label: 'Cover (Crop)', desc: 'Scale image to fill container' },
@@ -25,33 +16,6 @@ export default function ImageSetting() {
     <div className="flex-1 flex flex-col min-h-0 bg-card text-foreground">
       {/* Scroll Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {/* Refresh Rate Selector */}
-        <div className="space-y-2.5">
-          <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
-            Camera Refresh Rate
-          </label>
-          <Select
-            value={String(messagesSettings.refreshRateHz)}
-            onValueChange={val => updateMessagesSettings({ refreshRateHz: Number(val) })}
-          >
-            <SelectTrigger className="w-full bg-background border-border text-[11px] h-8 px-2 font-mono">
-              <SelectValue placeholder="Select refresh rate..." />
-            </SelectTrigger>
-            <SelectContent position="popper" className="bg-popover text-popover-foreground">
-              {hzOptions.map(hz => (
-                <SelectItem key={hz} value={String(hz)} className="font-mono text-[11px] py-1 h-8">
-                  {hz}
-                  {' '}
-                  Hz
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="text-[9px] text-muted-foreground/60 block leading-tight">
-            Limits the rendering frequency of the camera viewport to save CPU.
-          </span>
-        </div>
-
         {/* Fit Mode Selector */}
         <div className="space-y-2.5">
           <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">

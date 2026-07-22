@@ -1,4 +1,4 @@
-import { Pause, Play } from 'lucide-react'
+import { FastForward, Pause, Play, Rewind } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -15,6 +15,8 @@ export default function PlayBack() {
     isPlaying,
     setIsPlaying,
     seekTo,
+    stepBackward,
+    stepForward,
     setPlaybackSpeed,
     playbackSpeed,
     elapsedSeconds,
@@ -43,10 +45,28 @@ export default function PlayBack() {
                 <Play className="size-5" />
               )}
         </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => stepBackward(1)}
+          disabled={durationSeconds === 0}
+          title="Backward 1s"
+        >
+          <Rewind className="size-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => stepForward(1)}
+          disabled={durationSeconds === 0}
+          title="Forward 1s"
+        >
+          <FastForward className="size-4" />
+        </Button>
       </div>
 
       {/* Progress Slider */}
-      <div className="flex-1 flex items-center px-4 max-w-4xl min-w-0">
+      <div className="flex-1 flex items-center px-2 max-w-4xl min-w-0">
         <input
           type="range"
           min={0}
@@ -69,10 +89,10 @@ export default function PlayBack() {
             onValueChange={val => setPlaybackSpeed(Number.parseFloat(val))}
             disabled={durationSeconds === 0}
           >
-            <SelectTrigger size="sm" className="font-mono text-[11px] min-w-[65px]">
+            <SelectTrigger size="sm" className="font-mono text-[11px] min-w-16.25">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent position="popper" align="end" className="min-w-[75px] font-mono text-[11px]">
+            <SelectContent position="popper" align="end" className="min-w-18.75 font-mono text-[11px]">
               <SelectItem value="0.1">0.1x</SelectItem>
               <SelectItem value="0.25">0.25x</SelectItem>
               <SelectItem value="0.5">0.5x</SelectItem>

@@ -3,6 +3,7 @@ import { parse } from '@foxglove/rosmsg'
 import { MessageReader as Ros2Reader } from '@foxglove/rosmsg2-serialization'
 import { MessageReader as Ros1Reader } from '@foxglove/rosmsg-serialization'
 import protobuf from 'protobufjs'
+import { checkH264IsKeyframe, isH264Format } from '@/lib/h264'
 import 'protobufjs/ext/descriptor'
 
 export interface DecodedMessage {
@@ -207,8 +208,6 @@ export class MessageCursor {
 
     let deserializer: (data: Uint8Array) => any = data => data
 
-    console.log('schema', schema)
-
     try {
       if (schema.encoding === 'protobuf') {
         const root = protobuf.Root.fromDescriptor(schema.data)
@@ -329,22 +328,55 @@ export class MessageCursor {
       reverse: true,
     })
 
+    const topicMessagesMap = new Map<string, DecodedMessage[]>()
+
     for await (const msg of backfillIterator) {
       const channel = this.reader.channelsById.get(msg.channelId)
       if (!channel) {
         continue
       }
+      if (!topicsRemaining.has(channel.topic)) {
+        continue
+      }
 
-      if (topicsRemaining.has(channel.topic)) {
+      const decoded = this.decodeMessage(msg)
+      if (!decoded) {
+        continue
+      }
+
+      if (!topicMessagesMap.has(channel.topic)) {
+        topicMessagesMap.set(channel.topic, [])
+      }
+      const list = topicMessagesMap.get(channel.topic)!
+
+      const payload = decoded.payload
+      const isCompressed = payload && payload.format !== undefined && payload.data !== undefined
+      const isH264 = isCompressed && isH264Format(payload.format)
+
+      list.push(decoded)
+
+      if (!isH264) {
+        // Standard topic: 1 message is sufficient
         topicsRemaining.delete(channel.topic)
-        const decoded = this.decodeMessage(msg)
-        if (decoded) {
-          messages.push(decoded)
-        }
-        if (topicsRemaining.size === 0) {
-          break
+      }
+      else {
+        // H.264 topic: continue backfilling until Keyframe (IDR/SPS) is found
+        const uint8 = payload.data instanceof Uint8Array ? payload.data : new Uint8Array(payload.data)
+        const isKey = checkH264IsKeyframe(uint8)
+        if (isKey || list.length >= 120) {
+          topicsRemaining.delete(channel.topic)
         }
       }
+
+      if (topicsRemaining.size === 0) {
+        break
+      }
+    }
+
+    // Sort per-topic backfill messages chronologically (Keyframe first -> Delta frames -> Seek frame)
+    for (const list of topicMessagesMap.values()) {
+      list.reverse()
+      messages.push(...list)
     }
 
     return messages
