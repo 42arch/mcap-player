@@ -1,3 +1,5 @@
+import { getSceneEntityLabel } from './scene-labels'
+
 export type Vector3Tuple = [number, number, number]
 export type QuaternionTuple = [number, number, number, number]
 export type ColorTuple = [number, number, number, number]
@@ -54,6 +56,8 @@ export interface ParsedText extends ParsedPrimitive {
   fontSize: number
   billboard: boolean
   scaleInvariant: boolean
+  hasBackground?: boolean
+  screenSize?: number
 }
 
 export interface ParsedModel extends ParsedPrimitive {
@@ -78,6 +82,10 @@ export interface ParsedSceneUpdate {
 interface StoredEntity {
   entity: any
   expiresAtNs: bigint | null
+}
+
+export interface SceneUpdateParseOptions {
+  labelFields?: readonly string[]
 }
 
 export function createEmptySceneUpdate(): ParsedSceneUpdate {
@@ -129,7 +137,7 @@ export class SceneUpdateState {
     this.entities.clear()
   }
 
-  apply(payload: any, logTimeNs: bigint): ParsedSceneUpdate {
+  apply(payload: any, logTimeNs: bigint, options?: SceneUpdateParseOptions): ParsedSceneUpdate {
     this.removeExpired(logTimeNs)
 
     for (const id of Array.isArray(payload?.deletions) ? payload.deletions : []) {
@@ -153,7 +161,14 @@ export class SceneUpdateState {
       }
     }
 
-    return parseSceneUpdate({ entities: Array.from(this.entities.values(), entry => entry.entity) })
+    return this.snapshot(options)
+  }
+
+  snapshot(options?: SceneUpdateParseOptions): ParsedSceneUpdate {
+    return parseSceneUpdate(
+      { entities: Array.from(this.entities.values(), entry => entry.entity) },
+      options,
+    )
   }
 
   private removeExpired(logTimeNs: bigint) {
@@ -212,7 +227,7 @@ function parseIndices(indices: unknown): number[] {
   return Array.isArray(indices) ? indices.map(index => Number(index)) : []
 }
 
-export function parseSceneUpdate(payload: any): ParsedSceneUpdate {
+export function parseSceneUpdate(payload: any, options: SceneUpdateParseOptions = {}): ParsedSceneUpdate {
   const scene = createEmptySceneUpdate()
 
   if (!payload || !Array.isArray(payload.entities)) {
@@ -222,6 +237,7 @@ export function parseSceneUpdate(payload: any): ParsedSceneUpdate {
   for (const entity of payload.entities) {
     const entityId = entity.id || 'entity'
     const frameId = entity.frame_id || 'base_link'
+    const entityLabel = getSceneEntityLabel(entity, options.labelFields || [])
     let category: string | undefined
     if (Array.isArray(entity.metadata)) {
       const categoryMetadata = entity.metadata.find((metadata: any) => metadata.key === 'category')
@@ -244,14 +260,30 @@ export function parseSceneUpdate(payload: any): ParsedSceneUpdate {
 
     for (const [index, cube] of (entity.cubes || []).entries()) {
       const pose = parsePose(cube)
+      const size = parseVector(cube.size, [1, 1, 1])
       scene.cubes.push({
         id: `${entityId}-cube-${index}`,
         ...pose,
-        size: parseVector(cube.size, [1, 1, 1]),
+        size,
         color: parseColor(cube.color, [0.2, 0.8, 1, 0.5]),
         category,
         frameId,
       })
+      if (entityLabel) {
+        scene.texts.push({
+          id: `${entityId}-derived-label-${index}`,
+          position: [pose.position[0], pose.position[1], pose.position[2] + size[2] / 2 + 0.3],
+          orientation: [0, 0, 0, 1],
+          text: entityLabel,
+          fontSize: 0.55,
+          billboard: true,
+          scaleInvariant: true,
+          hasBackground: true,
+          screenSize: 22,
+          color: [1, 1, 1, 1],
+          frameId,
+        })
+      }
     }
 
     for (const [index, sphere] of (entity.spheres || []).entries()) {

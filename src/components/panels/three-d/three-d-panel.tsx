@@ -1,9 +1,12 @@
-import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Canvas } from '@react-three/fiber'
 import { Box, ChevronDown, Eye, EyeOff, Layers, Maximize2, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as THREE from 'three'
-import { OrbitControls as OrbitControlsImpl } from 'three/examples/jsm/controls/OrbitControls.js'
-import { SceneUpdateLayer } from '@/components/panels/scene-update-layer'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { CameraControls } from '@/components/panels/three-d/camera-controls'
+import { GridLayer } from '@/components/panels/three-d/grid-layer'
+import { PointCloudLayer } from '@/components/panels/three-d/point-cloud-layer'
+import { SceneUpdateLayer } from '@/components/panels/three-d/scene-update-layer'
+import { FrameTransformCoordinator } from '@/components/panels/three-d/tf-coordinator'
+import { getThreeDTopicKind, isThreeDChannel } from '@/components/panels/three-d/three-d-topic'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,9 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { globalMessageBus } from '@/core/message-bus'
 import { globalPlaybackController } from '@/core/playback-controller'
-import { parsePointCloud } from '@/lib/point-cloud-parser'
 import { usePlayerStore } from '@/stores/use-player-store'
 
 // Helper to determine if a hex color is light or dark
@@ -34,227 +35,6 @@ function isLightHexColor(hex: string): boolean {
   return brightness > 140
 }
 
-function CameraControls({
-  resetTrigger,
-  topViewTrigger,
-}: {
-  resetTrigger: number
-  topViewTrigger: number
-}) {
-  const { camera, gl } = useThree()
-  const controlsRef = useRef<OrbitControlsImpl | null>(null)
-
-  useEffect(() => {
-    const controls = new OrbitControlsImpl(camera, gl.domElement)
-    controls.enableDamping = true
-    controls.dampingFactor = 0.08
-    controls.target.set(0, 0, 0)
-    controlsRef.current = controls
-
-    return () => {
-      controls.dispose()
-    }
-  }, [camera, gl])
-
-  useEffect(() => {
-    if (resetTrigger > 0 && controlsRef.current) {
-      camera.position.set(-15, -15, 12)
-      controlsRef.current.target.set(0, 0, 0)
-      camera.lookAt(0, 0, 0)
-      controlsRef.current.update()
-    }
-  }, [resetTrigger, camera])
-
-  useEffect(() => {
-    if (topViewTrigger > 0 && controlsRef.current) {
-      camera.position.set(0, 0, 35)
-      controlsRef.current.target.set(0, 0, 0)
-      camera.lookAt(0, 0, 0)
-      controlsRef.current.update()
-    }
-  }, [topViewTrigger, camera])
-
-  useFrame(() => {
-    controlsRef.current?.update()
-  })
-
-  return null
-}
-
-function PointCloudLayer({
-  topic,
-  onPointCountUpdate,
-}: {
-  topic: string
-  onPointCountUpdate: (topic: string, count: number) => void
-}) {
-  const pointsRef = useRef<THREE.Points>(null)
-  const geometryRef = useRef<THREE.BufferGeometry>(null)
-  const lastPayloadRef = useRef<any>(null)
-
-  const [lidarPos, setLidarPos] = useState<[number, number, number]>([0.9437, 0, 1.8402])
-  const [lidarRot, setLidarRot] = useState<[number, number, number, number]>([
-    -0.0065,
-    0.0106,
-    -0.7063,
-    0.7078,
-  ])
-
-  const threeDSettings = usePlayerStore(state => state.threeDSettings)
-  const colorMode = threeDSettings.colorMode
-  const solidColor = threeDSettings.solidColor
-  const maxPoints = threeDSettings.maxPoints
-  const pointSize = threeDSettings.pointSize
-
-  // Stable refs: avoid re-subscribing when settings or callbacks change
-  const settingsRef = useRef({ colorMode, solidColor, maxPoints })
-  settingsRef.current = { colorMode, solidColor, maxPoints }
-
-  const onPointCountUpdateRef = useRef(onPointCountUpdate)
-  onPointCountUpdateRef.current = onPointCountUpdate
-
-  const posBufferRef = useRef<Float32Array>(new Float32Array(maxPoints * 3))
-  const colBufferRef = useRef<Float32Array>(new Float32Array(maxPoints * 3))
-
-  useEffect(() => {
-    if (posBufferRef.current.length < maxPoints * 3) {
-      posBufferRef.current = new Float32Array(maxPoints * 3)
-      colBufferRef.current = new Float32Array(maxPoints * 3)
-    }
-
-    const geometry = geometryRef.current
-    if (geometry) {
-      const posAttr = new THREE.BufferAttribute(posBufferRef.current, 3)
-      const colAttr = new THREE.BufferAttribute(colBufferRef.current, 3)
-      posAttr.setUsage(THREE.DynamicDrawUsage)
-      colAttr.setUsage(THREE.DynamicDrawUsage)
-      geometry.setAttribute('position', posAttr)
-      geometry.setAttribute('color', colAttr)
-      geometry.setDrawRange(0, 0)
-      geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 300)
-    }
-  }, [maxPoints])
-
-  const lastReportedCountRef = useRef<number>(-1)
-  const lastReportTimeRef = useRef<number>(0)
-
-  const renderPayload = (payload: any) => {
-    if (!payload || !geometryRef.current) {
-      return
-    }
-
-    const geometry = geometryRef.current
-    const posAttr = geometry.attributes.position as THREE.BufferAttribute
-    const colAttr = geometry.attributes.color as THREE.BufferAttribute
-    if (!posAttr || !colAttr) {
-      return
-    }
-
-    const { colorMode: cm, solidColor: sc, maxPoints: mp } = settingsRef.current
-
-    // Parse directly into GPU-backing buffers (zero-copy)
-    const parsed = parsePointCloud(payload, {
-      colorMode: cm,
-      solidColor: sc,
-      maxPoints: mp,
-    }, {
-      positions: posAttr.array as Float32Array,
-      colors: colAttr.array as Float32Array,
-    })
-
-    if (!parsed) {
-      return
-    }
-
-    posAttr.needsUpdate = true
-    colAttr.needsUpdate = true
-    geometry.setDrawRange(0, parsed.pointCount)
-
-    // Throttled point count notification via stable ref
-    const now = performance.now()
-    if (
-      Math.abs(parsed.pointCount - lastReportedCountRef.current) > 500
-      || now - lastReportTimeRef.current > 1000
-    ) {
-      lastReportedCountRef.current = parsed.pointCount
-      lastReportTimeRef.current = now
-      onPointCountUpdateRef.current(topic, parsed.pointCount)
-    }
-  }
-
-  useEffect(() => {
-    if (lastPayloadRef.current) {
-      renderPayload(lastPayloadRef.current)
-    }
-  }, [colorMode, solidColor, maxPoints])
-
-  useEffect(() => {
-    if (!topic) {
-      onPointCountUpdateRef.current(topic, 0)
-      return
-    }
-
-    // Subscribe to TF transforms for LIDAR sensor orientation alignment
-    const unsubTf = globalMessageBus.subscribe('/tf', (msg: any) => {
-      if (!msg || !msg.payload) {
-        return
-      }
-      const p = msg.payload
-      if (
-        p.parent_frame_id === 'base_link'
-        && (p.child_frame_id === 'LIDAR_TOP' || topic.toLowerCase().includes(p.child_frame_id.toLowerCase()))
-      ) {
-        setLidarPos([p.translation?.x ?? 0, p.translation?.y ?? 0, p.translation?.z ?? 0])
-        setLidarRot([
-          p.rotation?.x ?? 0,
-          p.rotation?.y ?? 0,
-          p.rotation?.z ?? -0.7071,
-          p.rotation?.w ?? 0.7071,
-        ])
-      }
-    })
-
-    const unsub = globalMessageBus.subscribe(topic, (msg: any) => {
-      if (!msg || !msg.payload) {
-        return
-      }
-
-      lastPayloadRef.current = msg.payload
-      renderPayload(msg.payload)
-    })
-
-    const unsubSeek = globalMessageBus.subscribe('__seek__', () => {
-      if (geometryRef.current) {
-        geometryRef.current.setDrawRange(0, 0)
-      }
-      lastPayloadRef.current = null
-      onPointCountUpdateRef.current(topic, 0)
-    })
-
-    return () => {
-      unsubTf()
-      unsub()
-      unsubSeek()
-      onPointCountUpdateRef.current(topic, 0)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topic])
-
-  return (
-    <points ref={pointsRef} position={lidarPos} quaternion={lidarRot}>
-      <bufferGeometry ref={geometryRef} />
-      <pointsMaterial
-        key={`${pointSize}`}
-        size={pointSize}
-        sizeAttenuation={false}
-        vertexColors={true}
-        transparent={false}
-        depthWrite={true}
-      />
-    </points>
-  )
-}
-
 export default function ThreeDPanel() {
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const threeDSettings = usePlayerStore(state => state.threeDSettings)
@@ -263,27 +43,13 @@ export default function ThreeDPanel() {
   const [topicCounts, setTopicCounts] = useState<Record<string, number>>({})
   const [resetTrigger, setResetTrigger] = useState<number>(0)
   const [topViewTrigger, setTopViewTrigger] = useState<number>(0)
+  const tfCoordinator = useMemo(() => new FrameTransformCoordinator(), [])
 
   const bgColor = threeDSettings.backgroundColor || '#ffffff'
   const isLightBg = isLightHexColor(bgColor)
 
   const spatialChannels = useMemo(() => {
-    return (fileSummary?.channels || []).filter((ch) => {
-      const name = (ch.schemaName || '').toLowerCase()
-      const t = ch.topic.toLowerCase()
-      return (
-        name.includes('pointcloud')
-        || name.includes('point_cloud')
-        || name.includes('foxglove.pointcloud')
-        || name.includes('sceneupdate')
-        || name.includes('foxglove.sceneupdate')
-        || t.includes('pointcloud')
-        || t.includes('points')
-        || t.includes('lidar')
-        || t.includes('marker')
-        || t.includes('annotation')
-      )
-    })
+    return (fileSummary?.channels || []).filter(isThreeDChannel)
   }, [fileSummary])
 
   const spatialTopics = useMemo(() => spatialChannels.map(ch => ch.topic), [spatialChannels])
@@ -302,6 +68,11 @@ export default function ThreeDPanel() {
   }, [spatialChannels])
 
   useEffect(() => {
+    tfCoordinator.connect()
+    return () => tfCoordinator.disconnect()
+  }, [tfCoordinator])
+
+  useEffect(() => {
     const currentSubscribed = usePlayerStore.getState().subscribedTopics
     let hasNewSubscription = false
     const nextSubscribed = new Set(currentSubscribed)
@@ -313,7 +84,7 @@ export default function ThreeDPanel() {
       }
     }
 
-    if (spatialTopics.some(t => topicSchemaMap.get(t)?.toLowerCase().includes('sceneupdate') || t.includes('marker') || t.includes('annotation'))) {
+    if (activeTopics.length > 0) {
       if (!nextSubscribed.has('/tf')) {
         nextSubscribed.add('/tf')
         hasNewSubscription = true
@@ -337,7 +108,7 @@ export default function ThreeDPanel() {
         usePlayerStore.getState().setSubscribedTopics(cleaned)
       }
     }
-  }, [activeTopics, spatialTopics, topicSchemaMap])
+  }, [activeTopics, spatialTopics])
 
   const handlePointCountUpdate = useCallback((topic: string, count: number) => {
     setTopicCounts(prev => ({ ...prev, [topic]: count }))
@@ -534,18 +305,24 @@ export default function ThreeDPanel() {
           {threeDSettings.showAxes && <axesHelper args={[5]} />}
 
           {activeTopics.map((topic) => {
-            const schema = (topicSchemaMap.get(topic) || '').toLowerCase()
-            const isSceneUpdate = schema.includes('sceneupdate') || topic.includes('marker') || topic.includes('annotation')
-            if (isSceneUpdate) {
-              return <SceneUpdateLayer key={topic} topic={topic} />
+            const kind = getThreeDTopicKind(topicSchemaMap.get(topic), topic)
+            if (kind === 'scene-update') {
+              return <SceneUpdateLayer key={topic} topic={topic} tfCoordinator={tfCoordinator} />
             }
-            return (
-              <PointCloudLayer
-                key={topic}
-                topic={topic}
-                onPointCountUpdate={handlePointCountUpdate}
-              />
-            )
+            if (kind === 'grid') {
+              return <GridLayer key={topic} topic={topic} tfCoordinator={tfCoordinator} />
+            }
+            if (kind === 'point-cloud') {
+              return (
+                <PointCloudLayer
+                  key={topic}
+                  topic={topic}
+                  onPointCountUpdate={handlePointCountUpdate}
+                  tfCoordinator={tfCoordinator}
+                />
+              )
+            }
+            return null
           })}
         </Canvas>
       </div>

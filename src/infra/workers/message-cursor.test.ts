@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { copyBinaryPayload, getTransferableBuffers, selectLatestMessages, selectLatestWithSceneUpdates } from './message-cursor'
+import { copyBinaryPayload, getTransferableBuffers, sanitizePayload, selectLatestMessages, selectLatestWithSceneUpdates } from './message-cursor'
 
 interface Message {
   topic: string
@@ -74,5 +74,21 @@ describe('binary transfer helpers', () => {
     ] as any)
 
     expect(buffers).toEqual([data.buffer])
+  })
+
+  it('preserves foxglove.Grid data as transferable bytes', () => {
+    const source = new Uint8Array([0, 1, 2])
+    const payload = sanitizePayload({
+      column_count: 3,
+      row_stride: 3,
+      cell_stride: 1,
+      data: source,
+    })
+
+    source[1] = 99
+
+    expect(payload.data).toBeInstanceOf(Uint8Array)
+    expect(Array.from(payload.data)).toEqual([0, 1, 2])
+    expect(payload.data.buffer).not.toBe(source.buffer)
   })
 })

@@ -53,6 +53,7 @@ export interface PlotSeries {
 export interface ThreeDSettings {
   selectedTopic: string | null
   visibleTopics: Record<string, boolean>
+  labelFieldsByTopic: Record<string, string[]>
   pointSize: number
   colorMode: 'height' | 'intensity' | 'solid'
   solidColor: string
@@ -148,6 +149,7 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   threeDSettings: {
     selectedTopic: null,
     visibleTopics: {},
+    labelFieldsByTopic: {},
     pointSize: 2.0,
     colorMode: 'height',
     solidColor: '#00ffcc',
@@ -175,6 +177,7 @@ export const usePlayerStore = create<PlayerStore>(set => ({
       threeDSettings: {
         selectedTopic: null,
         visibleTopics: {},
+        labelFieldsByTopic: {},
         pointSize: 2.0,
         colorMode: 'height',
         solidColor: '#00ffcc',

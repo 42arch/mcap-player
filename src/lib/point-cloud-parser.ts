@@ -73,18 +73,18 @@ function parseFieldType(typeInput: any): number {
       return 7
     if (t.includes('FLOAT64') || t === '8')
       return 8
-    if (t.includes('INT32') || t === '5')
-      return 5
     if (t.includes('UINT32') || t === '6')
       return 6
-    if (t.includes('INT16') || t === '3')
-      return 3
+    if (t.includes('INT32') || t === '5')
+      return 5
     if (t.includes('UINT16') || t === '4')
       return 4
-    if (t.includes('INT8') || t === '1')
-      return 1
+    if (t.includes('INT16') || t === '3')
+      return 3
     if (t.includes('UINT8') || t === '2')
       return 2
+    if (t.includes('INT8') || t === '1')
+      return 1
   }
   return 7
 }

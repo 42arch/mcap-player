@@ -1,9 +1,9 @@
 import { AlertCircle, ChevronDown, FileCode, LayoutGrid, Loader2 } from 'lucide-react'
-import OverviewPanel from '@/components/panels/overview-panel'
-import RawMessagePanel from '@/components/panels/raw-message-panel'
-import ImagePanel from '@/components/panels/image-panel'
-import PlotPanel from '@/components/panels/plot-panel'
-import ThreeDPanel from '@/components/panels/three-d-panel'
+import OverviewPanel from '@/components/panels/overview/overview-panel'
+import RawMessagePanel from '@/components/panels/messages/raw-message-panel'
+import ImagePanel from '@/components/panels/image/image-panel'
+import PlotPanel from '@/components/panels/plot/plot-panel'
+import ThreeDPanel from '@/components/panels/three-d/three-d-panel'
 import {
   DropdownMenu,
   DropdownMenuContent,

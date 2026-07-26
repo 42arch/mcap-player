@@ -1,3 +1,4 @@
+import type { FrameTransformCoordinator } from '@/components/panels/three-d/tf-coordinator'
 import type {
   ColorTuple,
   ParsedArrow,
@@ -10,12 +11,14 @@ import type {
   ParsedText,
   ParsedTriangleList,
 } from '@/lib/scene-update-parser'
+import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { globalMessageBus } from '@/core/message-bus'
 import { createEmptySceneUpdate, isMapFrame, SceneUpdateState } from '@/lib/scene-update-parser'
+import { usePlayerStore } from '@/stores/use-player-store'
 
 // Single global unit box geometry & edges geometry shared by all bounding box instances
 const unitBoxGeo = new THREE.BoxGeometry(1, 1, 1)
@@ -24,6 +27,8 @@ const unitEdgesGeo = new THREE.EdgesGeometry(unitBoxGeo)
 // Global material caches to prevent allocating new Three.js materials on every frame
 const boxMaterialCache = new Map<string, THREE.MeshStandardMaterial>()
 const lineMaterialCache = new Map<string, THREE.LineBasicMaterial>()
+const textTextureCache = new Map<string, { texture: THREE.CanvasTexture, references: number }>()
+const emptyLabelFields: string[] = []
 
 function getBoxMaterial(colorHex: string, alpha: number): THREE.MeshStandardMaterial {
   const key = `${colorHex}-${alpha.toFixed(2)}`
@@ -292,46 +297,137 @@ function ArrowPrimitiveView({ arrow }: { arrow: ParsedArrow }) {
   )
 }
 
+type TextTextureSource = Pick<ParsedText, 'text' | 'fontSize' | 'hasBackground' | 'screenSize'>
+
+const textTextureScale = 2
+const textTextureStyleVersion = 'outlined-regular-v1'
+
+function getTextTextureKey(text: TextTextureSource, color: string, alpha: number): string {
+  return [
+    textTextureStyleVersion,
+    text.text,
+    text.fontSize,
+    text.screenSize || 0,
+    color,
+    alpha,
+    Boolean(text.hasBackground),
+  ].join('|')
+}
+
+function acquireTextTexture(text: TextTextureSource, color: string, alpha: number): THREE.CanvasTexture | null {
+  if (!text.text) {
+    return null
+  }
+
+  const cacheKey = getTextTextureKey(text, color, alpha)
+  const cached = textTextureCache.get(cacheKey)
+  if (cached) {
+    cached.references++
+    return cached.texture
+  }
+
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
+  if (!context) {
+    return null
+  }
+
+  const fontPixelSize = text.screenSize
+    ? Math.max(12, Math.round(text.screenSize * 0.64))
+    : Math.max(32, Math.round(text.fontSize * 48))
+  const horizontalPadding = text.hasBackground ? 7 : 3
+  const verticalPadding = text.hasBackground ? 4 : 3
+  context.font = `400 ${fontPixelSize}px sans-serif`
+  const logicalWidth = Math.ceil(context.measureText(text.text).width) + horizontalPadding * 2
+  const logicalHeight = fontPixelSize + verticalPadding * 2
+  canvas.width = logicalWidth * textTextureScale
+  canvas.height = logicalHeight * textTextureScale
+  context.scale(textTextureScale, textTextureScale)
+  context.font = `400 ${fontPixelSize}px sans-serif`
+  context.textBaseline = 'middle'
+
+  if (text.hasBackground) {
+    context.strokeStyle = 'rgba(15, 23, 42, 0.78)'
+    context.lineWidth = 1
+    context.beginPath()
+    context.roundRect(0.5, 0.5, logicalWidth - 1, logicalHeight - 1, 3.5)
+    context.stroke()
+  }
+
+  context.fillStyle = color
+  context.globalAlpha = alpha
+  if (text.hasBackground) {
+    context.strokeStyle = 'rgba(15, 23, 42, 0.7)'
+    context.lineWidth = 0.75
+    context.strokeText(text.text, horizontalPadding, logicalHeight / 2)
+  }
+  context.fillText(text.text, horizontalPadding, logicalHeight / 2)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.magFilter = THREE.LinearFilter
+  textTextureCache.set(cacheKey, { texture, references: 1 })
+  return texture
+}
+
+function releaseTextTexture(text: TextTextureSource, color: string, alpha: number) {
+  const cacheKey = getTextTextureKey(text, color, alpha)
+  const cached = textTextureCache.get(cacheKey)
+  if (!cached) {
+    return
+  }
+
+  cached.references--
+  if (cached.references <= 0) {
+    cached.texture.dispose()
+    textTextureCache.delete(cacheKey)
+  }
+}
+
 function TextPrimitiveView({ text }: { text: ParsedText }) {
   const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null)
+  const viewportHeight = useThree(state => state.size.height)
+  const camera = useThree(state => state.camera)
   const { color, alpha } = getColorStyle(text.color)
+  const textValue = text.text
+  const fontSize = text.fontSize
+  const hasBackground = text.hasBackground
+  const screenSize = text.screenSize
 
   useEffect(() => {
-    const canvas = document.createElement('canvas')
-    const context = canvas.getContext('2d')
-    if (!context || !text.text) {
+    const textureSource = { text: textValue, fontSize, hasBackground, screenSize }
+    const nextTexture = acquireTextTexture(textureSource, color, alpha)
+    if (!nextTexture) {
+      setTexture(null)
       return
     }
-
-    const pixelSize = Math.max(16, Math.round(text.fontSize * 32))
-    context.font = `${pixelSize}px sans-serif`
-    const width = Math.ceil(context.measureText(text.text).width) + 12
-    canvas.width = width
-    canvas.height = pixelSize + 12
-    context.font = `${pixelSize}px sans-serif`
-    context.fillStyle = color
-    context.globalAlpha = alpha
-    context.textBaseline = 'middle'
-    context.fillText(text.text, 6, canvas.height / 2)
-
-    const nextTexture = new THREE.CanvasTexture(canvas)
-    nextTexture.colorSpace = THREE.SRGBColorSpace
     setTexture(nextTexture)
     return () => {
-      nextTexture.dispose()
+      releaseTextTexture(textureSource, color, alpha)
     }
-  }, [text.text, text.fontSize, color, alpha])
+  }, [textValue, fontSize, hasBackground, screenSize, color, alpha])
 
   if (!texture) {
     return null
   }
 
-  const height = Math.max(text.fontSize, 0.25)
+  const screenHeightPixels = screenSize
+    ?? (text.scaleInvariant ? Math.max(16, Math.round(text.fontSize * 22)) : null)
+  const projectionScale = Math.max(Math.abs(camera.projectionMatrix.elements[5]), Number.EPSILON)
+  const height = screenHeightPixels === null
+    ? Math.max(text.fontSize, 0.25)
+    : (screenHeightPixels * 2) / Math.max(viewportHeight * projectionScale, 1)
   const width = height * (texture.image.width / texture.image.height)
   return (
     <group position={text.position} quaternion={text.orientation}>
       <sprite scale={[width, height, 1]}>
-        <spriteMaterial map={texture} transparent depthWrite={false} />
+        <spriteMaterial
+          map={texture}
+          transparent
+          depthWrite={false}
+          sizeAttenuation={screenHeightPixels === null}
+        />
       </sprite>
     </group>
   )
@@ -424,21 +520,21 @@ function EgoVehicleModel({ model }: { model: ParsedModel }) {
 
   return (
     <group position={model.position} quaternion={model.orientation} scale={model.scale}>
-      {gltfScene ? (
-        <primitive object={gltfScene} rotation={[Math.PI / 2, 0, 0]} />
-      ) : (
-        // Fallback stylized vehicle model while loading GLB
-        <group>
-          <mesh position={[0, 0, 0.4]}>
-            <boxGeometry args={[4.2, 1.9, 0.7]} />
-            <meshStandardMaterial color="#3b82f6" metalness={0.4} roughness={0.3} />
-          </mesh>
-          <mesh position={[-0.3, 0, 1.05]}>
-            <boxGeometry args={[2.2, 1.5, 0.6]} />
-            <meshStandardMaterial color="#1e293b" metalness={0.8} roughness={0.1} transparent opacity={0.85} />
-          </mesh>
-        </group>
-      )}
+      {gltfScene
+        ? <primitive object={gltfScene} rotation={[Math.PI / 2, 0, 0]} />
+        : (
+          // Fallback stylized vehicle model while loading GLB
+            <group>
+              <mesh position={[0, 0, 0.4]}>
+                <boxGeometry args={[4.2, 1.9, 0.7]} />
+                <meshStandardMaterial color="#3b82f6" metalness={0.4} roughness={0.3} />
+              </mesh>
+              <mesh position={[-0.3, 0, 1.05]}>
+                <boxGeometry args={[2.2, 1.5, 0.6]} />
+                <meshStandardMaterial color="#1e293b" metalness={0.8} roughness={0.1} transparent opacity={0.85} />
+              </mesh>
+            </group>
+          )}
     </group>
   )
 }
@@ -532,16 +628,17 @@ function getLogTimeNs(message: any): bigint {
   return 0n
 }
 
-export function SceneUpdateLayer({ topic }: { topic: string }) {
+export function SceneUpdateLayer({ topic, tfCoordinator }: { topic: string, tfCoordinator: FrameTransformCoordinator }) {
   const [scene, setScene] = useState<ParsedSceneUpdate>(createEmptySceneUpdate)
+  const labelFields = usePlayerStore(
+    state => state.threeDSettings.labelFieldsByTopic[topic] || emptyLabelFields,
+  )
   const pendingUpdatesRef = useRef<PendingSceneUpdate[]>([])
   const sceneStateRef = useRef(new SceneUpdateState())
   const rafIdRef = useRef<number | null>(null)
   const mapGroupRef = useRef<THREE.Group>(null)
-  const transformRef = useRef({
-    position: new THREE.Vector3(),
-    quaternion: new THREE.Quaternion(),
-  })
+  const labelFieldsRef = useRef(labelFields)
+  labelFieldsRef.current = labelFields
 
   const sceneByFrame = useMemo(() => splitSceneByFrame(scene), [scene])
 
@@ -552,6 +649,7 @@ export function SceneUpdateLayer({ topic }: { topic: string }) {
 
     pendingUpdatesRef.current = []
     sceneStateRef.current.clear()
+    setScene(createEmptySceneUpdate())
 
     const scheduleSceneUpdate = () => {
       if (rafIdRef.current !== null) {
@@ -563,42 +661,20 @@ export function SceneUpdateLayer({ topic }: { topic: string }) {
         if (updates.length > 0) {
           let nextScene = createEmptySceneUpdate()
           for (const update of updates) {
-            nextScene = sceneStateRef.current.apply(update.payload, update.logTimeNs)
+            nextScene = sceneStateRef.current.apply(
+              update.payload,
+              update.logTimeNs,
+              { labelFields: labelFieldsRef.current },
+            )
           }
           setScene(nextScene)
         }
       })
     }
 
-    // Moving map-frame objects only requires updating their shared root transform.
-    const unsubTf = globalMessageBus.subscribe('/tf', (msg: any) => {
-      if (!msg || !msg.payload) {
-        return
-      }
-      const p = msg.payload
-      if (p.parent_frame_id === 'map' && p.child_frame_id === 'base_link') {
-        const mapGroup = mapGroupRef.current
-        if (!mapGroup) {
-          return
-        }
-
-        const { position, quaternion } = transformRef.current
-        quaternion.set(
-          p.rotation?.x ?? 0,
-          p.rotation?.y ?? 0,
-          p.rotation?.z ?? 0,
-          p.rotation?.w ?? 1,
-        ).invert()
-        position.set(
-          p.translation?.x ?? 0,
-          p.translation?.y ?? 0,
-          p.translation?.z ?? 0,
-        ).applyQuaternion(quaternion).multiplyScalar(-1)
-        mapGroup.position.copy(position)
-        mapGroup.quaternion.copy(quaternion)
-        mapGroup.updateMatrix()
-      }
-    })
+    const unregisterMapTarget = mapGroupRef.current
+      ? tfCoordinator.registerMapTarget(mapGroupRef.current)
+      : undefined
 
     // Subscribe to SceneUpdate topic
     const unsubTopic = globalMessageBus.subscribe(topic, (msg: any) => {
@@ -629,11 +705,15 @@ export function SceneUpdateLayer({ topic }: { topic: string }) {
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = null
       }
-      unsubTf()
+      unregisterMapTarget?.()
       unsubTopic()
       unsubSeek()
     }
-  }, [topic])
+  }, [topic, tfCoordinator])
+
+  useEffect(() => {
+    setScene(sceneStateRef.current.snapshot({ labelFields }))
+  }, [labelFields])
 
   return (
     <group>

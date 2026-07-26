@@ -1,10 +1,13 @@
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Tags } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { ColorPicker } from '@/components/ui/color-picker'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
+import { getThreeDTopicKind, isThreeDChannel } from '@/components/panels/three-d/three-d-topic'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { collectSceneLabelFields } from '@/lib/scene-labels'
 import { usePlayerStore } from '@/stores/use-player-store'
 
 export default function ThreeDSetting() {
@@ -15,26 +18,54 @@ export default function ThreeDSetting() {
   const setAllTopicsVisibility = usePlayerStore(state => state.setAllTopicsVisibility)
   const subscribedTopics = usePlayerStore(state => state.subscribedTopics)
 
-  // Filter channels for potential 3D PointCloud and SceneUpdate (Marker) topics
-  const spatial3DTopics = (fileSummary?.channels || [])
-    .filter((ch) => {
-      const name = (ch.schemaName || '').toLowerCase()
-      const t = ch.topic.toLowerCase()
-      return (
-        name.includes('pointcloud')
-        || name.includes('point_cloud')
-        || name.includes('foxglove.pointcloud')
-        || name.includes('sceneupdate')
-        || name.includes('foxglove.sceneupdate')
-        || t.includes('pointcloud')
-        || t.includes('points')
-        || t.includes('lidar')
-        || t.includes('marker')
-        || t.includes('annotation')
-      )
-    })
+  // Filter channels supported by the 3D renderer.
+  const channels = fileSummary?.channels
+  const spatial3DTopics = useMemo(
+    () => (channels || []).filter(isThreeDChannel),
+    [channels],
+  )
+  const sceneUpdateTopics = useMemo(
+    () => spatial3DTopics.filter(
+      channel => getThreeDTopicKind(channel.schemaName, channel.topic) === 'scene-update',
+    ),
+    [spatial3DTopics],
+  )
+  const [labelFieldOptions, setLabelFieldOptions] = useState<Record<string, string[]>>({})
+  const labelTopics = useMemo(
+    () => sceneUpdateTopics.filter(channel => (labelFieldOptions[channel.topic]?.length || 0) > 0),
+    [sceneUpdateTopics, labelFieldOptions],
+  )
 
   const topicNames = spatial3DTopics.map(ch => ch.topic)
+
+  useEffect(() => {
+    let isCancelled = false
+    if (sceneUpdateTopics.length === 0) {
+      setLabelFieldOptions({})
+      return
+    }
+
+    Promise.all(
+      sceneUpdateTopics.map(async (channel) => {
+        const payload = await globalPlaybackController.getFirstMessagePayload(channel.topic)
+        return [channel.topic, collectSceneLabelFields(payload)] as const
+      }),
+    )
+      .then((entries) => {
+        if (!isCancelled) {
+          setLabelFieldOptions(Object.fromEntries(entries))
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setLabelFieldOptions({})
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [sceneUpdateTopics])
 
   const handleSelectAll = (visible: boolean) => {
     setAllTopicsVisibility(topicNames, visible)
@@ -60,6 +91,20 @@ export default function ThreeDSetting() {
       usePlayerStore.getState().setSubscribedTopics(next)
       globalPlaybackController.triggerBackfill()
     }
+  }
+
+  const handleToggleLabelField = (topic: string, field: string) => {
+    const currentFields = threeDSettings.labelFieldsByTopic[topic] || []
+    const nextFields = currentFields.includes(field)
+      ? currentFields.filter(value => value !== field)
+      : [...currentFields, field]
+
+    updateThreeDSettings({
+      labelFieldsByTopic: {
+        ...threeDSettings.labelFieldsByTopic,
+        [topic]: nextFields,
+      },
+    })
   }
 
   const colorModeOptions = [
@@ -149,6 +194,63 @@ export default function ThreeDSetting() {
                 )}
           </div>
         </div>
+
+        {/* Derived labels for SceneUpdate entities */}
+        {labelTopics.length > 0 && (
+          <div className="space-y-3 pt-3 border-t border-border">
+            <div className="flex items-center gap-1.5">
+              <Tags className="size-3.5 text-muted-foreground" />
+              <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                Annotation Labels (标注标签)
+              </label>
+            </div>
+            <p className="text-[9px] text-muted-foreground/60 leading-relaxed">
+              Select entity fields to combine into labels above SceneUpdate geometry.
+            </p>
+
+            <div className="space-y-3">
+              {labelTopics.map((channel) => {
+                const fields = labelFieldOptions[channel.topic] || []
+                const selectedFields = threeDSettings.labelFieldsByTopic[channel.topic] || []
+                return (
+                  <div key={channel.id} className="space-y-2 rounded-md border border-border/70 p-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-[10px] font-medium truncate" title={channel.topic}>
+                        {channel.topic}
+                      </span>
+                      {selectedFields.length > 0 && (
+                        <span className="shrink-0 text-[9px] text-primary">
+                          {selectedFields.length}
+                          {' '}
+                          selected
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {fields.map((field) => {
+                        const isSelected = selectedFields.includes(field)
+                        return (
+                          <Button
+                            key={field}
+                            type="button"
+                            variant={isSelected ? 'default' : 'outline'}
+                            size="sm"
+                            className="h-6 px-2 text-[9px] font-mono"
+                            onClick={() => handleToggleLabelField(channel.topic, field)}
+                            aria-pressed={isSelected}
+                          >
+                            {field}
+                          </Button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Scene Background Color */}
         <div className="space-y-2.5">
@@ -253,8 +355,8 @@ export default function ThreeDSetting() {
         <div className="pt-2 border-t border-border space-y-3">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
-              <span className="text-xs font-semibold text-foreground block">Ground Grid</span>
-              <span className="text-[9px] text-muted-foreground/60 block">Show 100x100m reference grid</span>
+              <span className="text-xs font-semibold text-foreground block">Reference Grid</span>
+              <span className="text-[9px] text-muted-foreground/60 block">Show the 100x100m helper grid, independent of Grid topics</span>
             </div>
             <Switch
               checked={threeDSettings.showGrid}

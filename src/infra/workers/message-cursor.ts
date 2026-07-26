@@ -86,7 +86,7 @@ export function selectLatestWithSceneUpdates<T>(
   })
 }
 
-function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw' = 'placeholder'): any {
+export function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw' = 'placeholder'): any {
   if (value === null || value === undefined) {
     return value
   }
@@ -127,10 +127,14 @@ function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw'
     const isCompressedImage = value.format !== undefined && value.data !== undefined
     const isPointCloud = (value.point_step !== undefined || value.point_stride !== undefined || value.fields !== undefined) && value.data !== undefined
     const isSceneUpdate = value.entities !== undefined || value.cubes !== undefined || value.models !== undefined
+    const isGrid = (value.column_count !== undefined || value.columnCount !== undefined)
+      && (value.row_stride !== undefined || value.rowStride !== undefined)
+      && (value.cell_stride !== undefined || value.cellStride !== undefined)
+      && value.data !== undefined
 
     const res: any = {}
     for (const k of Object.keys(value)) {
-      if ((isImage || isCompressedImage || isPointCloud || isSceneUpdate) && k === 'data') {
+      if ((isImage || isCompressedImage || isPointCloud || isSceneUpdate || isGrid) && k === 'data') {
         // The deserializer can return a view into a reader-owned buffer. Copy it
         // before transferring ownership to the main thread so the reader remains
         // usable for later seeks and reads.
