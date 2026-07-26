@@ -3,6 +3,7 @@ import OverviewPanel from '@/components/panels/overview-panel'
 import RawMessagePanel from '@/components/panels/raw-message-panel'
 import ImagePanel from '@/components/panels/image-panel'
 import PlotPanel from '@/components/panels/plot-panel'
+import ThreeDPanel from '@/components/panels/three-d-panel'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -107,6 +108,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
                 {activePanel === 'messages' && 'Raw Message View'}
                 {activePanel === 'image' && 'Camera Image View'}
                 {activePanel === 'plot' && 'Plot Visualizer'}
+                {activePanel === '3d' && '3D Spatial View'}
                 <ChevronDown className="w-3.5 h-3.5 opacity-60" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-popover border border-border rounded-lg text-[10px] p-1 text-popover-foreground min-w-40 shadow-md z-50">
@@ -142,6 +144,14 @@ export default function MainContent({ darkMode }: MainContentProps) {
                 >
                   Plot Visualizer
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setActivePanel('3d')}
+                  className={`focus:bg-accent focus:text-accent-foreground py-1.5 px-2 rounded-md cursor-pointer ${
+                    activePanel === '3d' ? 'bg-muted font-bold' : ''
+                  }`}
+                >
+                  3D Spatial View
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -160,6 +170,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
         {activePanel === 'messages' && <RawMessagePanel />}
         {activePanel === 'image' && <ImagePanel />}
         {activePanel === 'plot' && <PlotPanel />}
+        {activePanel === '3d' && <ThreeDPanel />}
       </div>
     </div>
   )

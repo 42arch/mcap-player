@@ -94,7 +94,7 @@ export default function PlotSetting() {
 
           {/* Series Cards list */}
           <div className="space-y-4">
-            {plotSeries.map((s, index) => {
+            {plotSeries.map((s) => {
               const fields = availablePlotFields[s.topic] || []
               return (
                 <div key={s.id} className="p-3 border border-border bg-background rounded-lg space-y-3 relative group">

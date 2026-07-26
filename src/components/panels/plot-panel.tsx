@@ -1,7 +1,7 @@
 import { Loader2, Radio } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useEffect, useRef, useState } from 'react'
-import uPlot from 'uplot'
+import UPlot from 'uplot'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { usePlayerStore } from '@/stores/use-player-store'
 import 'uplot/dist/uPlot.min.css'
@@ -43,7 +43,7 @@ function mergeTimeSeries(datasets: Array<{ times: number[], values: number[] }>)
   return [
     globalTimes,
     ...alignedSeries,
-  ] as uPlot.AlignedData
+  ] as UPlot.AlignedData
 }
 
 export default function PlotPanel() {
@@ -58,8 +58,8 @@ export default function PlotPanel() {
 
   const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
-  const uplotRef = useRef<uPlot | null>(null)
-  const dataRef = useRef<uPlot.AlignedData>([[], []])
+  const uplotRef = useRef<UPlot | null>(null)
+  const dataRef = useRef<UPlot.AlignedData>([[], []])
 
   const [loadingData, setLoadingData] = useState(false)
 
@@ -168,7 +168,7 @@ export default function PlotPanel() {
     // Marker plugin drawing the vertical elapsed play time line
     const timeMarkerPlugin = {
       hooks: {
-        draw: (u: uPlot) => {
+        draw: (u: UPlot) => {
           const xVal = currentPlayTime.current
           if (xVal === null || xVal === undefined) {
             return
@@ -197,19 +197,19 @@ export default function PlotPanel() {
     // Tooltip plugin rendering values for all active series in alignment
     const tooltipPlugin = {
       hooks: {
-        setCursor: (u: uPlot) => {
+        setCursor: (u: UPlot) => {
           const { idx, left, top } = u.cursor
           const tooltipEl = tooltipRef.current
           if (!tooltipEl) {
             return
           }
 
-          if (idx === null || idx === undefined || left === -10 || left === undefined || left === null) {
+          if (idx === null || idx === undefined || left === -10 || left === undefined || left === null || top === undefined || top === null) {
             tooltipEl.style.display = 'none'
             return
           }
 
-          const xVal = u.data[0][idx]
+          const xVal = u.data[0]?.[idx]
           if (xVal === undefined) {
             tooltipEl.style.display = 'none'
             return
@@ -222,7 +222,7 @@ export default function PlotPanel() {
               <div class="flex items-center justify-between gap-6">
                 <span class="flex items-center gap-1.5 min-w-0">
                   <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color: ${s.color}"></span>
-                  <span class="truncate max-w-[90px] font-semibold" title="${s.name}">${s.name}</span>
+                  <span class="truncate max-w-36 font-semibold" title="${s.topic}.${s.path}">${s.topic}.${s.path}</span>
                 </span>
                 <span class="font-semibold text-right" style="color: ${s.color}">${valStr}</span>
               </div>
@@ -230,7 +230,6 @@ export default function PlotPanel() {
           }).join('')
 
           tooltipEl.innerHTML = `
-            <div class="font-bold text-[9px] text-muted-foreground uppercase tracking-wider mb-1">Plot Cursor</div>
             <div class="border-b border-border/40 pb-1 mb-1 font-semibold text-foreground">
               Time: <span>${xVal.toFixed(2)}s</span>
             </div>
@@ -239,12 +238,12 @@ export default function PlotPanel() {
             </div>
           `
 
-          const plotLeft = u.bbox.left
-          const plotTop = u.bbox.top
+          const plotLeft = u.over.offsetLeft
+          const plotTop = u.over.offsetTop
 
           const offset = 12
           const tooltipWidth = 150
-          const isRightSide = left > (u.bbox.width / 2)
+          const isRightSide = left > (u.over.clientWidth / 2)
 
           const finalLeft = isRightSide
             ? (left + plotLeft - tooltipWidth - offset)
@@ -263,9 +262,15 @@ export default function PlotPanel() {
       },
     }
 
-    const opts: uPlot.Options = {
+    const opts: UPlot.Options = {
       width,
       height,
+      cursor: {
+        drag: {
+          x: false,
+          y: false,
+        },
+      },
       scales: {
         x: {
           time: false,
@@ -273,12 +278,15 @@ export default function PlotPanel() {
           max: Number(fileSummary.durationNs) / 1e9,
         },
       },
+      legend: {
+        show: false,
+      },
       axes: [
         {
           grid: { stroke: gridCol },
           stroke: textCol,
           font: '10px monospace',
-          value: (u, val) => `${val.toFixed(1)}s`,
+          values: (u, splits) => splits.map(val => `${val.toFixed(1)}s`),
         },
         {
           grid: { stroke: gridCol },
@@ -296,41 +304,90 @@ export default function PlotPanel() {
           stroke: s.color,
           width: s.lineWidth || 2,
           dash: s.lineStyle === 'dashed' ? [6, 6] : undefined,
-          value: (u, v) => (v == null ? '-' : v.toFixed(4)),
+          value: (_: any, v: number | null) => (v == null ? '-' : v.toFixed(4)),
         })),
       ],
       plugins: [timeMarkerPlugin, tooltipPlugin],
     }
 
-    const uplot = new uPlot(opts, dataRef.current, containerRef.current)
-    uplotRef.current = uplot
+    const validDataLen = activeSeries.length + 1
+    const initialData: UPlot.AlignedData = (dataRef.current && dataRef.current.length === validDataLen)
+      ? dataRef.current
+      : [[], ...activeSeries.map(() => [])] as UPlot.AlignedData
 
-    // Drag to zoom vs click to seek distinction logic
+    const uplot = new UPlot(opts, initialData, containerRef.current)
+    uplotRef.current = uplot
+    uplot.over.style.cursor = 'grab'
+
+    // Mouse drag-to-pan & click-to-seek logic
+    let isDragging = false
     let dragStartX = 0
     let dragStartY = 0
+    let panInitialMin = 0
+    let panInitialMax = 0
 
     const handleMouseDown = (e: MouseEvent) => {
+      if (e.button !== 0) {
+        return
+      }
+      isDragging = true
       dragStartX = e.clientX
       dragStartY = e.clientY
+      panInitialMin = uplot.scales.x.min!
+      panInitialMax = uplot.scales.x.max!
+
+      uplot.over.style.cursor = 'grabbing'
+      document.body.style.cursor = 'grabbing'
+    }
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) {
+        return
+      }
+
+      const dxPx = e.clientX - dragStartX
+      const plotWidth = uplot.over.clientWidth
+      if (plotWidth <= 0) {
+        return
+      }
+
+      const xRange = panInitialMax - panInitialMin
+      const valPerPx = xRange / plotWidth
+      const newMin = panInitialMin - dxPx * valPerPx
+      const newMax = panInitialMax - dxPx * valPerPx
+
+      uplot.setScale('x', { min: newMin, max: newMax })
     }
 
     const handleMouseUp = (e: MouseEvent) => {
-      // Prevent seeking during double-clicks (double-click triggers reset zoom in uPlot)
+      if (!isDragging) {
+        return
+      }
+      isDragging = false
+
+      uplot.over.style.cursor = 'grab'
+      document.body.style.cursor = ''
+
+      // Prevent seeking during double-clicks
       if (e.detail > 1) {
         return
       }
-      // Prevent seeking during drag-to-zoom gestures
-      const dist = Math.sqrt((e.clientX - dragStartX) ** 2 + (e.clientY - dragStartY) ** 2)
-      if (dist > 4) {
-        return
-      }
 
-      const { left } = uplot.cursor
-      if (left !== null && left !== undefined && left >= 0) {
-        const timeVal = uplot.posToVal(left, 'x')
-        const seekNs = fileSummary.startNs + BigInt(Math.round(timeVal * 1e9))
-        globalPlaybackController.seek(seekNs)
+      // Seek playback if mouse move distance is minimal (single click gesture)
+      const dist = Math.sqrt((e.clientX - dragStartX) ** 2 + (e.clientY - dragStartY) ** 2)
+      if (dist <= 4) {
+        const { left } = uplot.cursor
+        if (left !== null && left !== undefined && left >= 0) {
+          const timeVal = uplot.posToVal(left, 'x')
+          const seekNs = fileSummary.startNs + BigInt(Math.round(timeVal * 1e9))
+          globalPlaybackController.seek(seekNs)
+        }
       }
+    }
+
+    const handleDblClick = () => {
+      const durationSec = Number(fileSummary.durationNs) / 1e9
+      uplot.setScale('x', { min: 0, max: durationSec })
     }
 
     // Scroll wheel zoom centered at mouse pointer position
@@ -338,7 +395,8 @@ export default function PlotPanel() {
       e.preventDefault()
 
       const { left } = uplot.cursor
-      if (left === null || left === undefined || left < 0) {
+      const plotWidth = uplot.over.clientWidth
+      if (left === null || left === undefined || left < 0 || left > plotWidth) {
         return
       }
 
@@ -356,7 +414,7 @@ export default function PlotPanel() {
         return
       }
 
-      const pct = (left - uplot.bbox.left) / uplot.bbox.width
+      const pct = left / plotWidth
       const newMin = mouseXVal - pct * newRange
       const newMax = newMin + newRange
 
@@ -364,7 +422,9 @@ export default function PlotPanel() {
     }
 
     uplot.over.addEventListener('mousedown', handleMouseDown)
-    uplot.over.addEventListener('mouseup', handleMouseUp)
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    uplot.over.addEventListener('dblclick', handleDblClick)
     uplot.over.addEventListener('wheel', handleWheel, { passive: false })
 
     // Resize Observer
@@ -384,9 +444,12 @@ export default function PlotPanel() {
       observer.disconnect()
       if (uplot.over) {
         uplot.over.removeEventListener('mousedown', handleMouseDown)
-        uplot.over.removeEventListener('mouseup', handleMouseUp)
+        uplot.over.removeEventListener('dblclick', handleDblClick)
         uplot.over.removeEventListener('wheel', handleWheel)
       }
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
       uplot.destroy()
       uplotRef.current = null
     }
@@ -400,7 +463,7 @@ export default function PlotPanel() {
           <div className="flex items-center gap-2">
             <Radio className="w-3.5 h-3.5 text-primary" />
             <span className="font-bold text-xs uppercase tracking-wide">
-              Time-series Plot (uPlot)
+              Time-series Plot
             </span>
           </div>
 
@@ -429,7 +492,7 @@ export default function PlotPanel() {
             ? (
                 <div className="text-center text-muted-foreground p-8">
                   <p className="text-xs font-semibold">No Series Configured</p>
-                  <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
+                  <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
                     Please add and configure a plot series in the left Settings tab to start visualization.
                   </p>
                 </div>
@@ -438,7 +501,7 @@ export default function PlotPanel() {
               ? (
                   <div className="text-center text-muted-foreground p-8">
                     <p className="text-xs font-semibold">Series Incomplete</p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
+                    <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
                       Please specify both topic and value path for your configured series in the left Settings tab to render.
                     </p>
                   </div>

@@ -50,6 +50,18 @@ export interface PlotSeries {
   color: string
 }
 
+export interface ThreeDSettings {
+  selectedTopic: string | null
+  visibleTopics: Record<string, boolean>
+  pointSize: number
+  colorMode: 'height' | 'intensity' | 'solid'
+  solidColor: string
+  backgroundColor: string
+  maxPoints: number
+  showGrid: boolean
+  showAxes: boolean
+}
+
 interface PlayerStore {
   fileSummary: McapFileSummary | null
   isLoading: boolean
@@ -66,7 +78,7 @@ interface PlayerStore {
   selectedTopic: string | null
 
   // Panel settings
-  activePanel: 'overview' | 'messages' | 'image' | 'plot'
+  activePanel: 'overview' | 'messages' | 'image' | 'plot' | '3d'
   messagesSettings: {
     refreshRateHz: number
     binaryFormat: 'placeholder' | 'hex' | 'raw'
@@ -78,6 +90,7 @@ interface PlayerStore {
   plotSettings: {
     windowSizeSeconds: number
   }
+  threeDSettings: ThreeDSettings
   plotSeries: PlotSeries[]
   availablePlotFields: Record<string, string[]>
 
@@ -91,10 +104,14 @@ interface PlayerStore {
   setSelectedTopic: (topic: string | null) => void
   toggleTopicSubscription: (topic: string) => void
   setSubscribedTopics: (topics: Set<string>) => void
-  setActivePanel: (panel: 'overview' | 'messages' | 'image' | 'plot') => void
+  setActivePanel: (panel: 'overview' | 'messages' | 'image' | 'plot' | '3d') => void
   updateMessagesSettings: (settings: Partial<PlayerStore['messagesSettings']>) => void
   updateImageSettings: (settings: Partial<PlayerStore['imageSettings']>) => void
   updatePlotSettings: (settings: Partial<PlayerStore['plotSettings']>) => void
+  updateThreeDSettings: (settings: Partial<ThreeDSettings>) => void
+  toggleTopicVisibility: (topic: string) => void
+  setTopicVisibility: (topic: string, visible: boolean) => void
+  setAllTopicsVisibility: (topics: string[], visible: boolean) => void
 
   // Plot series actions
   addPlotSeries: () => void
@@ -128,6 +145,17 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   plotSettings: {
     windowSizeSeconds: 15,
   },
+  threeDSettings: {
+    selectedTopic: null,
+    visibleTopics: {},
+    pointSize: 2.0,
+    colorMode: 'height',
+    solidColor: '#00ffcc',
+    backgroundColor: '#ffffff',
+    maxPoints: 200000,
+    showGrid: true,
+    showAxes: true,
+  },
   plotSeries: [],
   availablePlotFields: {},
 
@@ -143,6 +171,17 @@ export const usePlayerStore = create<PlayerStore>(set => ({
       activePanel: 'overview',
       plotSettings: {
         windowSizeSeconds: 15,
+      },
+      threeDSettings: {
+        selectedTopic: null,
+        visibleTopics: {},
+        pointSize: 2.0,
+        colorMode: 'height',
+        solidColor: '#00ffcc',
+        backgroundColor: '#ffffff',
+        maxPoints: 200000,
+        showGrid: true,
+        showAxes: true,
       },
       plotSeries: [
         {
@@ -193,6 +232,35 @@ export const usePlayerStore = create<PlayerStore>(set => ({
     set(state => ({
       plotSettings: { ...state.plotSettings, ...settings },
     })),
+  updateThreeDSettings: settings =>
+    set(state => ({
+      threeDSettings: { ...state.threeDSettings, ...settings },
+    })),
+  toggleTopicVisibility: topic =>
+    set(state => {
+      const current = state.threeDSettings.visibleTopics[topic] ?? true
+      const nextVisible = { ...state.threeDSettings.visibleTopics, [topic]: !current }
+      return {
+        threeDSettings: { ...state.threeDSettings, visibleTopics: nextVisible },
+      }
+    }),
+  setTopicVisibility: (topic, visible) =>
+    set(state => ({
+      threeDSettings: {
+        ...state.threeDSettings,
+        visibleTopics: { ...state.threeDSettings.visibleTopics, [topic]: visible },
+      },
+    })),
+  setAllTopicsVisibility: (topics, visible) =>
+    set(state => {
+      const nextVisible = { ...state.threeDSettings.visibleTopics }
+      for (const t of topics) {
+        nextVisible[t] = visible
+      }
+      return {
+        threeDSettings: { ...state.threeDSettings, visibleTopics: nextVisible },
+      }
+    }),
 
   addPlotSeries: () =>
     set((state) => {

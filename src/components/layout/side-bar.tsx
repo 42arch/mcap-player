@@ -4,6 +4,7 @@ import OverviewSetting from '@/components/panels/overview-setting'
 import RawMessageSetting from '@/components/panels/raw-message-setting'
 import ImageSetting from '@/components/panels/image-setting'
 import PlotSetting from '@/components/panels/plot-setting'
+import ThreeDSetting from '@/components/panels/three-d-setting'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { usePlayerStore } from '@/stores/use-player-store'
 
@@ -204,9 +205,13 @@ export default function SideBar() {
               ? (
                   <PlotSetting />
                 )
-              : (
-                  <RawMessageSetting />
-                )}
+              : activePanel === '3d'
+                ? (
+                    <ThreeDSetting />
+                  )
+                : (
+                    <RawMessageSetting />
+                  )}
     </div>
   )
 }

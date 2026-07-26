@@ -16,6 +16,76 @@ export interface DecodedMessage {
   payload: any
 }
 
+export type DispatchMode = 'latest' | 'all'
+
+interface BufferedMessage {
+  message: any
+  dataLength: number
+}
+
+export function copyBinaryPayload(value: ArrayBufferView): Uint8Array {
+  const source = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  const copy = new Uint8Array(source.byteLength)
+  copy.set(source)
+  return copy
+}
+
+export function getTransferableBuffers(messages: readonly DecodedMessage[]): ArrayBuffer[] {
+  const buffers = new Set<ArrayBuffer>()
+
+  for (const { payload } of messages) {
+    const data = payload?.data
+    if (ArrayBuffer.isView(data) && data.buffer instanceof ArrayBuffer) {
+      buffers.add(data.buffer)
+    }
+  }
+
+  return Array.from(buffers)
+}
+
+export function selectLatestMessages<T>(
+  messages: readonly T[],
+  getTopic: (message: T) => string | undefined,
+): T[] {
+  const latestByTopic = new Map<string, T>()
+  for (const message of messages) {
+    const topic = getTopic(message)
+    if (topic) {
+      latestByTopic.set(topic, message)
+    }
+  }
+  return Array.from(latestByTopic.values())
+}
+
+/**
+ * Point clouds can keep only their latest sample, but SceneUpdate messages are
+ * incremental and must be applied in order to retain entity updates/deletions.
+ */
+export function selectLatestWithSceneUpdates<T>(
+  messages: readonly T[],
+  getTopic: (message: T) => string | undefined,
+  isSceneUpdate: (message: T) => boolean,
+): T[] {
+  const latestByTopic = new Map<string, T>()
+  for (const message of messages) {
+    if (isSceneUpdate(message)) {
+      continue
+    }
+    const topic = getTopic(message)
+    if (topic) {
+      latestByTopic.set(topic, message)
+    }
+  }
+
+  return messages.filter((message) => {
+    if (isSceneUpdate(message)) {
+      return true
+    }
+    const topic = getTopic(message)
+    return topic !== undefined && latestByTopic.get(topic) === message
+  })
+}
+
 function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw' = 'placeholder'): any {
   if (value === null || value === undefined) {
     return value
@@ -45,7 +115,8 @@ function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw'
   }
 
   if (Array.isArray(value)) {
-    if (value.length > 128) {
+    // Do not truncate scene entities/markers array
+    if (value.length > 512) {
       return `[Array: ${value.length} items (truncated)]`
     }
     return value.map(val => sanitizePayload(val, binaryFormat))
@@ -54,11 +125,18 @@ function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw'
   if (typeof value === 'object') {
     const isImage = value.width !== undefined && value.height !== undefined && value.encoding !== undefined && value.data !== undefined
     const isCompressedImage = value.format !== undefined && value.data !== undefined
+    const isPointCloud = (value.point_step !== undefined || value.point_stride !== undefined || value.fields !== undefined) && value.data !== undefined
+    const isSceneUpdate = value.entities !== undefined || value.cubes !== undefined || value.models !== undefined
 
     const res: any = {}
     for (const k of Object.keys(value)) {
-      if ((isImage || isCompressedImage) && k === 'data') {
-        res[k] = value[k]
+      if ((isImage || isCompressedImage || isPointCloud || isSceneUpdate) && k === 'data') {
+        // The deserializer can return a view into a reader-owned buffer. Copy it
+        // before transferring ownership to the main thread so the reader remains
+        // usable for later seeks and reads.
+        res[k] = ArrayBuffer.isView(value[k])
+          ? copyBinaryPayload(value[k])
+          : value[k]
       }
       else {
         res[k] = sanitizePayload(value[k], binaryFormat)
@@ -72,7 +150,10 @@ function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw'
 
 export class MessageCursor {
   private reader: McapIndexedReader | null = null
-  private queue: DecodedMessage[] = []
+  // Keep raw MCAP messages in the read-ahead queue. Decoding is deferred until a
+  // consumer asks for a time range, so a "latest" consumer does not deserialize
+  // frames that will be discarded anyway.
+  private queue: BufferedMessage[] = []
   private totalBytes = 0
   private iterator: any = null
   private isPumping = false
@@ -136,12 +217,7 @@ export class MessageCursor {
           break
         }
 
-        const msg = next.value
-        const decoded = this.decodeMessage(msg)
-        if (decoded) {
-          this.queue.push(decoded)
-          this.totalBytes += decoded.dataLength
-        }
+        this.enqueue(next.value)
       }
     }
     catch (err) {
@@ -182,7 +258,7 @@ export class MessageCursor {
     }
   }
 
-  private getDeserializer(channelId: number) {
+  getDeserializer(channelId: number) {
     if (!this.reader) {
       return (data: Uint8Array) => data
     }
@@ -261,33 +337,29 @@ export class MessageCursor {
     return deserializer
   }
 
-  async drainUpTo(endTimeNs: bigint): Promise<DecodedMessage[]> {
+  async drainUpTo(endTimeNs: bigint, dispatchMode: DispatchMode): Promise<DecodedMessage[]> {
     // If the pump hasn't read up to endTimeNs yet, and we haven't hit the end of the file,
     // block and pump synchronously until we reach endTimeNs or the file ends.
     while (
       !this.hasEnded
       && this.iterator
-      && (this.queue.length === 0 || this.queue[this.queue.length - 1].logTime < endTimeNs)
+      && (this.queue.length === 0 || this.queue[this.queue.length - 1].message.logTime < endTimeNs)
     ) {
       const next = await this.iterator.next()
       if (next.done) {
         this.hasEnded = true
         break
       }
-      const msg = next.value
-      const decoded = this.decodeMessage(msg)
-      if (decoded) {
-        this.queue.push(decoded)
-        this.totalBytes += decoded.dataLength
-      }
+      this.enqueue(next.value)
     }
 
-    // Extract all messages from queue where logTime <= endTimeNs
-    const result: DecodedMessage[] = []
+    // Extract raw messages first. For visual panels, collapse each topic before
+    // deserializing it or crossing the Worker boundary.
+    const ready: BufferedMessage[] = []
     let i = 0
     while (i < this.queue.length) {
-      if (this.queue[i].logTime <= endTimeNs) {
-        result.push(this.queue[i])
+      if (this.queue[i].message.logTime <= endTimeNs) {
+        ready.push(this.queue[i])
         this.totalBytes -= this.queue[i].dataLength
         i++
       }
@@ -303,7 +375,55 @@ export class MessageCursor {
     // Re-trigger background pump asynchronously to top up the buffer
     this.pump().catch(err => console.error('Error replenishing background buffer:', err))
 
-    return result
+    return this.decodeReadyMessages(ready, dispatchMode)
+  }
+
+  private enqueue(message: any) {
+    this.queue.push({
+      message,
+      dataLength: message.data.byteLength,
+    })
+    this.totalBytes += message.data.byteLength
+  }
+
+  private decodeReadyMessages(messages: BufferedMessage[], dispatchMode: DispatchMode): DecodedMessage[] {
+    const rawMessages = messages.map(({ message }) => message)
+    const selected = dispatchMode === 'all'
+      ? rawMessages
+      : selectLatestWithSceneUpdates(
+          rawMessages,
+          message => this.reader?.channelsById.get(message.channelId)?.topic,
+          message => this.isSceneUpdateMessage(message),
+        )
+
+    return selected
+      .map(message => this.decodeMessage(message))
+      .filter((message): message is DecodedMessage => message !== null)
+  }
+
+  private isSceneUpdateMessage(message: any): boolean {
+    if (!this.reader) {
+      return false
+    }
+    const channel = this.reader.channelsById.get(message.channelId)
+    if (!channel) {
+      return false
+    }
+    const schemaName = this.reader.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
+    return schemaName.includes('sceneupdate') || schemaName.includes('scene_update')
+  }
+
+  private isSceneUpdateTopic(topic: string): boolean {
+    if (!this.reader) {
+      return false
+    }
+    return Array.from(this.reader.channelsById.values()).some((channel) => {
+      if (channel.topic !== topic) {
+        return false
+      }
+      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
+      return schemaName.includes('sceneupdate') || schemaName.includes('scene_update')
+    })
   }
 
   async getBackfillMessages(
@@ -319,12 +439,32 @@ export class MessageCursor {
     }
 
     const messages: DecodedMessage[] = []
-    const topicsRemaining = new Set(topics)
+    const sceneUpdateTopics = topics.filter(topic => this.isSceneUpdateTopic(topic))
+    const topicsRemaining = new Set(topics.filter(topic => !sceneUpdateTopics.includes(topic)))
+
+    // SceneUpdate is a stateful stream. Replay its history up to the seek point
+    // so a newly mounted layer can reconstruct entity additions and deletions.
+    if (sceneUpdateTopics.length > 0) {
+      const sceneIterator = this.reader.readMessages({
+        endTime: seekTimeNs + 1n,
+        topics: sceneUpdateTopics,
+      })
+      for await (const msg of sceneIterator) {
+        const decoded = this.decodeMessage(msg)
+        if (decoded) {
+          messages.push(decoded)
+        }
+      }
+    }
+
+    if (topicsRemaining.size === 0) {
+      return messages.sort((a, b) => a.logTime === b.logTime ? a.sequence - b.sequence : a.logTime < b.logTime ? -1 : 1)
+    }
 
     // Query backward to get latest historical messages
     const backfillIterator = this.reader.readMessages({
       endTime: seekTimeNs + 1n,
-      topics,
+      topics: Array.from(topicsRemaining),
       reverse: true,
     })
 
@@ -379,6 +519,6 @@ export class MessageCursor {
       messages.push(...list)
     }
 
-    return messages
+    return messages.sort((a, b) => a.logTime === b.logTime ? a.sequence - b.sequence : a.logTime < b.logTime ? -1 : 1)
   }
 }

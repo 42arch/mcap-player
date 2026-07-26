@@ -1,9 +1,10 @@
+import type { DispatchMode } from './message-cursor'
 import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'
-import { expose } from 'comlink'
+import { expose, transfer } from 'comlink'
 import { getValueByPath } from '../../lib/value-extractor'
-import { MessageCursor } from './message-cursor'
+import { getTransferableBuffers, MessageCursor } from './message-cursor'
 
 class McapWorker {
   private reader: McapIndexedReader | null = null
@@ -120,6 +121,7 @@ class McapWorker {
     endTimeNs: bigint,
     topics: string[],
     binaryFormat: 'placeholder' | 'hex' | 'raw',
+    dispatchMode: DispatchMode,
   ) {
     if (!this.reader) {
       return []
@@ -137,7 +139,8 @@ class McapWorker {
     }
 
     this.lastEndTimeNs = endTimeNs
-    return this.cursor.drainUpTo(endTimeNs)
+    const messages = await this.cursor.drainUpTo(endTimeNs, dispatchMode)
+    return transfer(messages, getTransferableBuffers(messages))
   }
 
   async getBackfillMessages(
@@ -153,7 +156,8 @@ class McapWorker {
     this.lastBinaryFormat = binaryFormat
     this.lastEndTimeNs = seekTimeNs + 1n // Next tick query should start contiguous with backfill end
 
-    return this.cursor.getBackfillMessages(seekTimeNs, topics, binaryFormat)
+    const messages = await this.cursor.getBackfillMessages(seekTimeNs, topics, binaryFormat)
+    return transfer(messages, getTransferableBuffers(messages))
   }
 
   async getFirstMessagePayload(topic: string) {

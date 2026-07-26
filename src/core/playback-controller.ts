@@ -6,10 +6,11 @@ import { PlaybackClock } from './playback-clock'
 export type DispatchMode = 'latest' | 'all'
 
 export const PANEL_DISPATCH_MODES: Record<string, DispatchMode> = {
-  image: 'latest',
-  overview: 'all',
-  messages: 'all',
-  plot: 'all',
+  'image': 'latest',
+  '3d': 'latest',
+  'overview': 'all',
+  'messages': 'all',
+  'plot': 'all',
 }
 
 export class PlaybackController {
@@ -183,29 +184,17 @@ export class PlaybackController {
           const queryEnd = current
           const version = this.queryVersion
           const binaryFormat = usePlayerStore.getState().messagesSettings.binaryFormat
-          worker.getMessages(start, queryEnd, subscribed, binaryFormat)
+          const activePanel = usePlayerStore.getState().activePanel
+          const dispatchMode = PANEL_DISPATCH_MODES[activePanel] ?? 'all'
+          worker.getMessages(start, queryEnd, subscribed, binaryFormat, dispatchMode)
             .then((messages: any[]) => {
               if (version !== this.queryVersion) {
                 return
               }
               this.lastTickTimeNs = queryEnd
 
-              const activePanel = usePlayerStore.getState().activePanel
-              const dispatchMode = PANEL_DISPATCH_MODES[activePanel] ?? 'all'
-
-              if (dispatchMode === 'latest') {
-                const latestMap = new Map<string, any>()
-                for (const msg of messages) {
-                  latestMap.set(msg.topic, msg)
-                }
-                for (const msg of latestMap.values()) {
-                  globalMessageBus.publish(msg.topic, msg)
-                }
-              }
-              else {
-                for (const msg of messages) {
-                  globalMessageBus.publish(msg.topic, msg)
-                }
+              for (const msg of messages) {
+                globalMessageBus.publish(msg.topic, msg)
               }
             })
             .catch((err: any) => {
