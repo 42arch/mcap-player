@@ -189,3 +189,224 @@
 [data-panel-resize-handle-state="drag"] {
   background-color: var(--primary-color) !important;
 }
+
+/* DockView is themed with the same semantic tokens as the application shell. */
+.mcap-dockview .dockview-theme-light,
+.mcap-dockview .dockview-theme-dark {
+  --dv-tabs-and-actions-container-height: 34px;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tab-font-size: 11px;
+  --dv-tab-margin: 3px 0 0 3px;
+  --dv-tab-border-radius: 5px 5px 0 0;
+  --dv-group-view-background-color: var(--background);
+  --dv-tabs-and-actions-container-background-color: color-mix(in oklch, var(--muted) 55%, var(--card));
+  --dv-activegroup-visiblepanel-tab-background-color: var(--background);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-inactivegroup-visiblepanel-tab-background-color: color-mix(in oklch, var(--background) 75%, var(--muted));
+  --dv-inactivegroup-visiblepanel-tab-color: var(--foreground);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+  --dv-tab-divider-color: transparent;
+  --dv-separator-border: 1px solid var(--border);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--ring);
+  --dv-drag-over-background-color: color-mix(in oklch, var(--primary) 9%, transparent);
+  --dv-drag-over-border-color: color-mix(in oklch, var(--primary) 45%, transparent);
+  --dv-icon-hover-background-color: var(--accent);
+}
+
+.mcap-dockview .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--border);
+}
+
+.mcap-dockview .dv-tab {
+  min-width: 80px;
+  max-width: 190px;
+  padding: 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.mcap-dockview .dv-tab::before {
+  display: none;
+}
+
+.mcap-dockview .dv-tab.dv-inactive-tab:hover {
+  background-color: color-mix(in oklch, var(--accent) 72%, transparent);
+  color: var(--accent-foreground);
+}
+
+.mcap-dockview .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px var(--primary);
+}
+
+.mcap-dockview .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px color-mix(in oklch, var(--primary) 35%, transparent);
+}
+
+.mcap-dockview .dv-tab:focus-within::after,
+.mcap-dockview .dv-tab:focus::after {
+  outline: 1px solid var(--ring) !important;
+  outline-offset: -1px;
+}
+
+.mcap-dockview .dv-groupview > .dv-content-container {
+  background: var(--background);
+}
+
+.mcap-dockview .dv-sash:not(.dv-disabled):hover,
+.mcap-dockview .dv-sash:not(.dv-disabled):active {
+  background-color: var(--ring);
+}
+
+.mcap-panel-tab {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px 1px;
+}
+
+.mcap-panel-tab__icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  color: var(--muted-foreground);
+  transition: color 120ms ease;
+}
+
+.dv-active-tab .mcap-panel-tab__icon,
+.mcap-panel-tab:hover .mcap-panel-tab__icon {
+  color: var(--foreground);
+}
+
+.mcap-panel-tab__title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcap-dockview .dv-right-actions-container {
+  flex: none;
+  align-items: center;
+}
+
+.mcap-panel-group-actions {
+  display: flex;
+  height: 100%;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-left: 1px solid var(--border);
+  background: color-mix(in oklch, var(--card) 94%, transparent);
+}
+
+.mcap-panel-card {
+  container-type: inline-size;
+}
+
+.mcap-panel-content-header {
+  display: flex;
+  min-height: 42px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--card) 90%, var(--muted));
+  user-select: none;
+}
+
+.mcap-panel-content-header__identity {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+}
+
+.mcap-panel-content-header__icon {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.mcap-panel-content-header__icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.mcap-panel-content-header__title {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcap-panel-content-header__actions {
+  display: flex;
+  min-width: 0;
+  max-width: 70%;
+  flex: 0 1 auto;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mcap-panel-content-header__actions::-webkit-scrollbar {
+  display: none;
+}
+
+.mcap-panel-content-header__label {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+@container (max-width: 460px) {
+  .mcap-panel-content-header {
+    gap: 8px;
+    padding-inline: 8px;
+  }
+
+  .mcap-panel-content-header__label {
+    display: none;
+  }
+
+  .mcap-panel-topic-select {
+    width: min(176px, 100%);
+  }
+}
+
+@container (max-width: 340px) {
+  .mcap-panel-content-header__title {
+    max-width: 76px;
+  }
+
+  .mcap-panel-content-header__actions {
+    max-width: calc(100% - 106px);
+  }
+}

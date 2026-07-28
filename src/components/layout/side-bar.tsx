@@ -1,20 +1,17 @@
 import { FileText, Info, Radio, Search } from 'lucide-react'
 import { useState } from 'react'
-import OverviewSetting from '@/components/panels/overview/overview-setting'
-import RawMessageSetting from '@/components/panels/messages/raw-message-setting'
-import ImageSetting from '@/components/panels/image/image-setting'
-import PlotSetting from '@/components/panels/plot/plot-setting'
-import ThreeDSetting from '@/components/panels/three-d/three-d-setting'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
+import PanelSettingsHost from './panel-settings-host'
 
 export default function SideBar() {
-  const activePanel = usePlayerStore(state => state.activePanel)
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const selectedTopic = usePlayerStore(state => state.selectedTopic)
   const setSelectedTopic = usePlayerStore(state => state.setSelectedTopic)
+  const activeTab = usePanelStore(state => state.sidebarTab)
+  const setActiveTab = usePanelStore(state => state.setSidebarTab)
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeTab, setActiveTab] = useState<'topics' | 'settings'>('topics')
 
   if (!fileSummary) {
     return (
@@ -193,25 +190,7 @@ export default function SideBar() {
               )}
             </div>
           )
-        : activePanel === 'overview'
-          ? (
-              <OverviewSetting />
-            )
-          : activePanel === 'image'
-            ? (
-                <ImageSetting />
-              )
-            : activePanel === 'plot'
-              ? (
-                  <PlotSetting />
-                )
-              : activePanel === '3d'
-                ? (
-                    <ThreeDSetting />
-                  )
-                : (
-                    <RawMessageSetting />
-                  )}
+        : <PanelSettingsHost />}
     </div>
   )
 }

@@ -346,8 +346,8 @@ flowchart TB
 ```typescript
 // 面向 ROS 文件的随机读取接口
 interface Readable {
-  size(): number;
-  read(offset: number, length: number): Promise<Uint8Array>;
+  size: () => number
+  read: (offset: number, length: number) => Promise<Uint8Array>
 }
 
 // 本地文件
@@ -367,20 +367,20 @@ class CachedFilelike implements Readable {
 
 ```typescript
 interface IIterableSource {
-  initialize(): Promise<Initialization>;
-  messageIterator(args: MessageIteratorArgs): AsyncIterableIterator<IteratorResult>;
-  getBackfillMessages(args: GetBackfillMessagesArgs): Promise<MessageEvent[]>;
+  initialize: () => Promise<Initialization>
+  messageIterator: (args: MessageIteratorArgs) => AsyncIterableIterator<IteratorResult>
+  getBackfillMessages: (args: GetBackfillMessagesArgs) => Promise<MessageEvent[]>
 }
 
 // Initialization 包含：
 interface Initialization {
-  topics: TopicInfo[];        // 所有 Topic 及类型
-  datatypes: RosDatatypes;    // 消息类型定义树
-  start: Time;                // 数据起始时间
-  end: Time;                  // 数据结束时间
-  publishersByTopic: Map<string, Set<string>>;
-  topicStats: Map<string, TopicStats>;
-  problems: PlayerProblem[];
+  topics: TopicInfo[] // 所有 Topic 及类型
+  datatypes: RosDatatypes // 消息类型定义树
+  start: Time // 数据起始时间
+  end: Time // 数据结束时间
+  publishersByTopic: Map<string, Set<string>>
+  topicStats: Map<string, TopicStats>
+  problems: PlayerProblem[]
 }
 ```
 
@@ -415,26 +415,26 @@ Zustand store 只承载低频元数据。`PlayerState.activeData.currentTime` �
 ```typescript
 interface MessagePipelineState {
   // Player 状态
-  playerState: PlayerState;
-  sortedTopics: Topic[];
-  datatypes: RosDatatypes;
+  playerState: PlayerState
+  sortedTopics: Topic[]
+  datatypes: RosDatatypes
 
   // 订阅管理
-  subscriptions: Map<string, SubscriptionInfo>;
+  subscriptions: Map<string, SubscriptionInfo>
 
   // 消息分发（按面板 subscriberId 分桶）
-  messageEventsBySubscriberId: Map<string, MessageEvent[]>;
-  lastMessageEventByTopic: Map<string, MessageEvent>;
+  messageEventsBySubscriberId: Map<string, MessageEvent[]>
+  lastMessageEventByTopic: Map<string, MessageEvent>
 
   // 帧率控制
-  msPerFrame: number;  // 默认 16.67ms (60fps)
+  msPerFrame: number // 默认 16.67ms (60fps)
 
   // 操作
-  seekPlayback: (time: Time) => void;
-  startPlayback: () => void;
-  pausePlayback: () => void;
-  setPlaybackSpeed: (speed: number) => void;
-  setSubscriptions: (id: string, subscriptions: Subscription[]) => void;
+  seekPlayback: (time: Time) => void
+  startPlayback: () => void
+  pausePlayback: () => void
+  setPlaybackSpeed: (speed: number) => void
+  setSubscriptions: (id: string, subscriptions: Subscription[]) => void
 }
 ```
 
@@ -452,8 +452,8 @@ interface MessagePipelineState {
 function ImagePanel() {
   // 只在该面板订阅的消息更新时重渲染
   const messages = useMessagePipeline(
-    (state) => state.messageEventsBySubscriberId.get(panelId)
-  );
+    state => state.messageEventsBySubscriberId.get(panelId)
+  )
   // ...
 }
 ```
@@ -563,28 +563,29 @@ sequenceDiagram
 ```typescript
 // MessagePipeline 帧率控制
 class FrameRateController {
-  private msPerFrame: number = 16.67; // 60fps
-  private lastFrameTime: number = 0;
-  private pendingFrame: PlayerState | null = null;
-  private renderDoneCallbacks: Set<() => void> = new Set();
+  private msPerFrame: number = 16.67 // 60fps
+  private lastFrameTime: number = 0
+  private pendingFrame: PlayerState | null = null
+  private renderDoneCallbacks: Set<() => void> = new Set()
 
   onPlayerStateUpdate(state: PlayerState) {
-    this.pendingFrame = state;
-    this.scheduleFrame();
+    this.pendingFrame = state
+    this.scheduleFrame()
   }
 
   private scheduleFrame() {
-    const now = performance.now();
-    const elapsed = now - this.lastFrameTime;
+    const now = performance.now()
+    const elapsed = now - this.lastFrameTime
     if (elapsed >= this.msPerFrame && this.allPanelsReady()) {
-      this.dispatchFrame();
-    } else {
-      requestAnimationFrame(() => this.scheduleFrame());
+      this.dispatchFrame()
+    }
+    else {
+      requestAnimationFrame(() => this.scheduleFrame())
     }
   }
 
   private allPanelsReady(): boolean {
-    return this.renderDoneCallbacks.size === 0;
+    return this.renderDoneCallbacks.size === 0
   }
 }
 ```
@@ -595,40 +596,41 @@ class FrameRateController {
 
 ```typescript
 // 播放时间不通过 React state 传递
-const currentTimeRef = useRef<Time>();
-const subscribersRef = useRef<Set<(time: Time) => void>>(new Set());
+const currentTimeRef = useRef<Time>()
+const subscribersRef = useRef<Set<(time: Time) => void>>(new Set())
 
 function subscribeCurrentTime(callback: (time: Time) => void) {
-  subscribersRef.current.add(callback);
-  if (currentTimeRef.current) callback(currentTimeRef.current);
-  return () => subscribersRef.current.delete(callback);
+  subscribersRef.current.add(callback)
+  if (currentTimeRef.current)
+    callback(currentTimeRef.current)
+  return () => subscribersRef.current.delete(callback)
 }
 
 function getCurrentTime() {
-  return currentTimeRef.current;
+  return currentTimeRef.current
 }
 
 // 播放推进时直接调 subscriber（不触发 React 渲染）
 function advanceTime(time: Time) {
-  currentTimeRef.current = time;
+  currentTimeRef.current = time
   for (const cb of subscribersRef.current) {
-    cb(time);
+    cb(time)
   }
 }
 
 // 面板内通过 subscriber 直接更新 DOM
 function PlaybackProgressSlider() {
-  const sliderRef = useRef<HTMLDivElement>(null);
+  const sliderRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     return subscribeCurrentTime((time) => {
       // 直接操作 DOM，不经过 React
       if (sliderRef.current) {
-        const percent = timeToPercent(time);
-        sliderRef.current.style.width = `${percent}%`;
+        const percent = timeToPercent(time)
+        sliderRef.current.style.width = `${percent}%`
       }
-    });
-  }, []);
+    })
+  }, [])
 }
 ```
 
@@ -641,10 +643,10 @@ function PlaybackProgressSlider() {
 `vite.config.ts` — 标准 Vite + React 配置，构建为可部署的静态网站：
 
 ```typescript
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import wasm from 'vite-plugin-wasm';
-import path from 'path';
+import path from 'node:path'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
+import wasm from 'vite-plugin-wasm'
 
 export default defineConfig({
   plugins: [react()],
@@ -661,14 +663,16 @@ export default defineConfig({
       output: {
         codeSplitting: true,
         manualChunks(id) {
-          if (id.includes('dockview')) return 'vendor-dockview';
-          if (id.includes('three')) return 'vendor-three';
+          if (id.includes('dockview'))
+            return 'vendor-dockview'
+          if (id.includes('three'))
+            return 'vendor-three'
           // ...
         },
       },
     },
   },
-});
+})
 ```
 
 > Worker  bundle（含 `@ioai/hdf5` Emscripten glue 的原生 top-level await）依赖 `build.target: 'esnext'` 与 ES Module Worker，面向 Chrome/Edge 目标时无需 `vite-plugin-top-level-await` polyfill。
@@ -680,14 +684,14 @@ export default defineConfig({
 要点：`build.lib.entry` 使用**绝对路径**；`dts()` 中设置 `compilerOptions.rootDir = <包>/src` 与 `entryRoot: <包>/src`，避免声明镜像落在 `dist-lib/src/...` 或在 monorepo 非包目录 cwd 下出现空的 `insertTypesEntry` / 空 rollup 结果。完整配置以仓库内 `vite.lib.config.ts` 为准。
 
 ```typescript
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import dts from 'vite-plugin-dts';
-import wasm from 'vite-plugin-wasm';
-import path from 'path';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vite'
+import dts from 'vite-plugin-dts'
+import wasm from 'vite-plugin-wasm'
 
-const packageDir = path.dirname(fileURLToPath(import.meta.url));
+const packageDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   root: packageDir,
@@ -724,14 +728,15 @@ export default defineConfig({
       external: ['react', 'react-dom', 'react/jsx-runtime'],
       output: {
         assetFileNames: (assetInfo) => {
-          if (assetInfo.name?.endsWith('.css')) return 'rosview.css';
-          return assetInfo.name || '[name][extname]';
+          if (assetInfo.name?.endsWith('.css'))
+            return 'rosview.css'
+          return assetInfo.name || '[name][extname]'
         },
       },
     },
     cssCodeSplit: false,
   },
-});
+})
 ```
 
 ### 7.3 package.json 配置
@@ -772,8 +777,9 @@ export default defineConfig({
 
 ```tsx
 // 在 app/ 主应用中使用（公开 API 以 src/entrypoints/index.ts 为准）
-import { RosViewer } from '@ioai/rosview';
-import '@ioai/rosview/style.css';
+import { RosViewer, RosViewProvider } from '@ioai/rosview'
+
+import '@ioai/rosview/style.css'
 
 function MyPage() {
   return (
@@ -781,14 +787,10 @@ function MyPage() {
       url="https://example.com/recording.mcap"
       theme="dark"
       language="zh"
-      onFatalError={(error) => console.error(error)}
+      onFatalError={error => console.error(error)}
     />
-  );
+  )
 }
-
-// 或自行组合 UI，仅接入主题 / 国际化上下文
-import { RosViewProvider } from '@ioai/rosview';
-import '@ioai/rosview/style.css';
 
 function CustomPage() {
   return (
@@ -797,7 +799,7 @@ function CustomPage() {
       {/* 自建布局与面板 */}
       <MyCustomFooter />
     </RosViewProvider>
-  );
+  )
 }
 ```
 
@@ -951,19 +953,19 @@ rosview/
 ```typescript
 // Player 接口抽象：未来可实现 RosbridgePlayer
 interface Player {
-  setListener(listener: (state: PlayerState) => Promise<void>): void;
-  setSubscriptions(subscriptions: Subscription[]): void;
-  requestBackfill(): void;
+  setListener: (listener: (state: PlayerState) => Promise<void>) => void
+  setSubscriptions: (subscriptions: Subscription[]) => void
+  requestBackfill: () => void
   // 实时连接专属
-  setPublishers?(publishers: Publisher[]): void;
-  publish?(request: PublishPayload): void;
+  setPublishers?: (publishers: Publisher[]) => void
+  publish?: (request: PublishPayload) => void
 }
 
 // DataSourceFactory 模式：根据输入类型创建对应 Player
 interface DataSourceFactory {
-  id: string;
-  type: 'file' | 'connection';
-  create(args: DataSourceArgs): Player;
+  id: string
+  type: 'file' | 'connection'
+  create: (args: DataSourceArgs) => Player
 }
 
 // 未来添加 rosbridge 工厂
@@ -981,11 +983,11 @@ interface DataSourceFactory {
 ```typescript
 // 面板注册接口
 interface PanelInfo {
-  type: string;                         // 唯一标识符
-  title: string;                        // 显示名称
-  module: () => Promise<{ default: PanelComponent }>;  // 懒加载
-  config?: PanelConfigSpec;             // 面板配置 schema
-  supportedMessageTypes?: string[];     // 支持的消息类型
+  type: string // 唯一标识符
+  title: string // 显示名称
+  module: () => Promise<{ default: PanelComponent }> // 懒加载
+  config?: PanelConfigSpec // 面板配置 schema
+  supportedMessageTypes?: string[] // 支持的消息类型
 }
 
 // 内置面板注册
@@ -993,13 +995,13 @@ const builtinPanels: PanelInfo[] = [
   { type: 'Image', title: 'Image', module: () => import('./panels/ImagePanel') },
   { type: 'Plot', title: 'Plot', module: () => import('./panels/PlotPanel') },
   // ...
-];
+]
 
 // 未来扩展接口
 interface ExtensionContext {
-  registerPanel(registration: PanelRegistration): void;
-  registerMessageConverter(registration: MessageConverterRegistration): void;
-  registerTopicAlias(registration: TopicAliasRegistration): void;
+  registerPanel: (registration: PanelRegistration) => void
+  registerMessageConverter: (registration: MessageConverterRegistration) => void
+  registerTopicAlias: (registration: TopicAliasRegistration) => void
 }
 ```
 

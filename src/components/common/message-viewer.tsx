@@ -60,9 +60,10 @@ interface JsonNodeProps {
   value: any
   depth: number
   expandState: 'default' | 'expanded' | 'collapsed'
+  binaryFormat: 'placeholder' | 'hex' | 'raw'
 }
 
-function JsonNode({ name, value, depth, expandState }: JsonNodeProps) {
+function JsonNode({ name, value, depth, expandState, binaryFormat }: JsonNodeProps) {
   const isObject = value !== null && typeof value === 'object'
   const isArray = Array.isArray(value)
   const [expanded, setExpanded] = useState(() => {
@@ -126,7 +127,19 @@ function JsonNode({ name, value, depth, expandState }: JsonNodeProps) {
     if (isBinary) {
       const len = value instanceof ArrayBuffer ? value.byteLength : (value as any).byteLength
       const typeName = value instanceof ArrayBuffer ? 'ArrayBuffer' : value.constructor.name
-      displayValue = `<${typeName}: ${len} bytes>`
+      const bytes = value instanceof ArrayBuffer
+        ? new Uint8Array(value)
+        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+      const preview = Array.from(bytes.subarray(0, 64))
+      if (binaryFormat === 'hex') {
+        displayValue = `<${typeName}: ${len} bytes [hex: ${preview.map(byte => byte.toString(16).padStart(2, '0')).join(' ')}${len > 64 ? ' ...' : ''}]>`
+      }
+      else if (binaryFormat === 'raw') {
+        displayValue = `<${typeName}: ${len} bytes [values: ${preview.join(', ')}${len > 64 ? ' ...' : ''}]>`
+      }
+      else {
+        displayValue = `<${typeName}: ${len} bytes>`
+      }
       valueClass = 'text-zinc-400 dark:text-zinc-500 font-semibold'
     }
     else if (typeof value === 'string') {
@@ -203,6 +216,7 @@ function JsonNode({ name, value, depth, expandState }: JsonNodeProps) {
                 value={val}
                 depth={depth + 1}
                 expandState={expandState}
+                binaryFormat={binaryFormat}
               />
             )
           })}
@@ -221,9 +235,10 @@ function JsonNode({ name, value, depth, expandState }: JsonNodeProps) {
 
 interface MessageViewerProps {
   data: any
+  binaryFormat?: 'placeholder' | 'hex' | 'raw'
 }
 
-export function MessageViewer({ data }: MessageViewerProps) {
+export function MessageViewer({ data, binaryFormat = 'placeholder' }: MessageViewerProps) {
   const [expandVersion, setExpandVersion] = useState(0)
   const [expandState, setExpandState] = useState<'default' | 'expanded' | 'collapsed'>('default')
   const [copied, setCopied] = useState(false)
@@ -290,7 +305,7 @@ export function MessageViewer({ data }: MessageViewerProps) {
 
       {/* JSON content rendering body */}
       <div className="flex-1 overflow-auto p-2 font-mono select-text">
-        <JsonNode key={expandVersion} value={data} depth={0} expandState={expandState} />
+        <JsonNode key={expandVersion} value={data} depth={0} expandState={expandState} binaryFormat={binaryFormat} />
       </div>
     </div>
   )

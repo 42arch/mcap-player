@@ -39,10 +39,10 @@ export default function PlayBack() {
         >
           {isPlaying
             ? (
-                <Pause className="size-5 text-primary" />
+                <Pause className="w-3.5 h-3.5 text-primary" />
               )
             : (
-                <Play className="size-5" />
+                <Play className="w-3.5 h-3.5" />
               )}
         </Button>
         <Button
@@ -52,7 +52,7 @@ export default function PlayBack() {
           disabled={durationSeconds === 0}
           title="Backward 1s"
         >
-          <Rewind className="size-4" />
+          <Rewind className="w-3.5 h-3.5" />
         </Button>
         <Button
           variant="ghost"
@@ -61,7 +61,7 @@ export default function PlayBack() {
           disabled={durationSeconds === 0}
           title="Forward 1s"
         >
-          <FastForward className="size-4" />
+          <FastForward className="w-3.5 h-3.5" />
         </Button>
       </div>
 

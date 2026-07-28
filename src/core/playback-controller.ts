@@ -1,17 +1,7 @@
 import { wrap } from 'comlink'
+import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
-import { globalMessageBus } from './message-bus'
 import { PlaybackClock } from './playback-clock'
-
-export type DispatchMode = 'latest' | 'all'
-
-export const PANEL_DISPATCH_MODES: Record<string, DispatchMode> = {
-  'image': 'latest',
-  '3d': 'latest',
-  'overview': 'all',
-  'messages': 'all',
-  'plot': 'all',
-}
 
 export class PlaybackController {
   private worker: any = null
@@ -21,42 +11,50 @@ export class PlaybackController {
   private fileSummary: any = null
   private isQuerying = false
   private queryVersion = 0
+  private pendingBackfillPanelIds = new Set<string>()
+  private backfillScheduled = false
 
   constructor() {
     if (typeof window !== 'undefined') {
-      let prevSubscribed = new Set<string>()
-      usePlayerStore.subscribe((state) => {
-        const currentSubscribed = state.subscribedTopics
-        const hasChanged = currentSubscribed.size !== prevSubscribed.size
-          || !Array.from(currentSubscribed).every(t => prevSubscribed.has(t))
-
-        if (hasChanged) {
-          prevSubscribed = new Set(currentSubscribed)
-          if (this.clock && !this.clock.getIsPlaying()) {
-            this.triggerBackfill()
-          }
+      globalMessagePipeline.onSubscriptionsChanged((panelId) => {
+        this.pendingBackfillPanelIds.add(panelId)
+        if (this.backfillScheduled) {
+          return
         }
+        this.backfillScheduled = true
+        queueMicrotask(() => {
+          this.backfillScheduled = false
+          const panelIds = Array.from(this.pendingBackfillPanelIds)
+          this.pendingBackfillPanelIds.clear()
+          this.triggerBackfill(panelIds)
+        })
       })
     }
   }
 
-  triggerBackfill() {
+  triggerBackfill(panelIds?: readonly string[]) {
     if (!this.clock || !this.fileSummary) {
       return
     }
     const ns = this.clock.get()
-    const subscribed = Array.from(usePlayerStore.getState().subscribedTopics)
+    const plan = globalMessagePipeline.getQueryPlan()
     const worker = this.getWorker()
-    if (subscribed.length > 0 && worker) {
+    if (plan.topics.length > 0 && worker) {
+      this.isQuerying = false
       this.queryVersion++
       const version = this.queryVersion
-      const binaryFormat = usePlayerStore.getState().messagesSettings.binaryFormat
-      worker.getBackfillMessages(ns, subscribed, binaryFormat).then((messages: any[]) => {
+      const isTargetedBackfill = Boolean(panelIds?.length)
+      worker.getBackfillMessages(ns, plan.topics, isTargetedBackfill).then((messages: any[]) => {
         if (version !== this.queryVersion) {
           return
         }
-        for (const msg of messages) {
-          globalMessageBus.publish(msg.topic, msg)
+        if (panelIds && panelIds.length > 0) {
+          for (const panelId of panelIds) {
+            globalMessagePipeline.dispatchToPanel(panelId, messages)
+          }
+        }
+        else {
+          globalMessagePipeline.dispatch(messages)
         }
       })
     }
@@ -68,7 +66,7 @@ export class PlaybackController {
     }
     if (!this.worker) {
       const rawWorker = new Worker(
-        new URL('../infra/workers/mcap.worker.ts', import.meta.url),
+        new URL('./workers/mcap.worker.ts', import.meta.url),
       )
       this.worker = wrap(rawWorker)
     }
@@ -128,24 +126,10 @@ export class PlaybackController {
     this.lastTickTimeNs = ns
     usePlayerStore.getState().setElapsedNs(ns - this.fileSummary.startNs)
 
-    // Notify listeners that we seeked so they can clear buffers
-    globalMessageBus.publish('__seek__', ns)
+    // Notify visible panel instances before their targeted backfill arrives.
+    globalMessagePipeline.emitSeek(ns)
 
-    // Trigger backfill
-    const subscribed = Array.from(usePlayerStore.getState().subscribedTopics)
-    const worker = this.getWorker()
-    if (worker) {
-      const version = this.queryVersion
-      const binaryFormat = usePlayerStore.getState().messagesSettings.binaryFormat
-      worker.getBackfillMessages(ns, subscribed, binaryFormat).then((messages: any[]) => {
-        if (version !== this.queryVersion) {
-          return
-        }
-        for (const msg of messages) {
-          globalMessageBus.publish(msg.topic, msg)
-        }
-      })
-    }
+    this.triggerBackfill()
   }
 
   setSpeed(speed: number) {
@@ -176,26 +160,21 @@ export class PlaybackController {
 
       usePlayerStore.getState().setElapsedNs(current - this.fileSummary.startNs)
 
-      const subscribed = Array.from(usePlayerStore.getState().subscribedTopics)
+      const plan = globalMessagePipeline.getQueryPlan()
       const worker = this.getWorker()
-      if (subscribed.length > 0 && current > start && worker) {
+      if (plan.topics.length > 0 && current > start && worker) {
         if (!this.isQuerying) {
           this.isQuerying = true
           const queryEnd = current
           const version = this.queryVersion
-          const binaryFormat = usePlayerStore.getState().messagesSettings.binaryFormat
-          const activePanel = usePlayerStore.getState().activePanel
-          const dispatchMode = PANEL_DISPATCH_MODES[activePanel] ?? 'all'
-          worker.getMessages(start, queryEnd, subscribed, binaryFormat, dispatchMode)
+          worker.getMessages(start, queryEnd, plan.topics, plan.modeByTopic)
             .then((messages: any[]) => {
               if (version !== this.queryVersion) {
                 return
               }
               this.lastTickTimeNs = queryEnd
 
-              for (const msg of messages) {
-                globalMessageBus.publish(msg.topic, msg)
-              }
+              globalMessagePipeline.dispatch(messages)
             })
             .catch((err: any) => {
               console.error('Error fetching messages in play loop:', err)

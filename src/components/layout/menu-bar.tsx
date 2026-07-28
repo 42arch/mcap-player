@@ -1,5 +1,6 @@
-import { Moon, Sun } from 'lucide-react'
+import { FileCode, Moon, Sun } from 'lucide-react'
 import { useRef } from 'react'
+import { Button } from '@/components/ui/button'
 import {
   Menubar,
   MenubarContent,
@@ -8,6 +9,11 @@ import {
   MenubarSeparator,
   MenubarTrigger,
 } from '@/components/ui/menubar'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { usePlayerStore } from '@/stores/use-player-store'
 
@@ -18,7 +24,9 @@ interface MenuBarProps {
 
 export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileSummary = usePlayerStore(state => state.fileSummary)
   const setIsLoading = usePlayerStore(state => state.setIsLoading)
+  const setFileSummary = usePlayerStore(state => state.setFileSummary)
   const setError = usePlayerStore(state => state.setError)
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,7 +54,7 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
   }
 
   return (
-    <div className="bg-card border-b border-border p-1 shrink-0 flex items-center justify-between px-3">
+    <div className="relative flex h-9 shrink-0 items-center justify-between border-b border-border bg-card px-3">
       {/* Hidden File Input */}
       <input
         type="file"
@@ -68,6 +76,13 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
               className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
             >
               Open File...
+            </MenubarItem>
+            <MenubarItem
+              disabled={!fileSummary}
+              onClick={() => setFileSummary(null)}
+              className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
+            >
+              Close File
             </MenubarItem>
             <MenubarSeparator className="bg-border" />
             <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Save</MenubarItem>
@@ -106,16 +121,33 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
         </MenubarMenu>
       </Menubar>
 
-      {/* Workspace Actions (Dark Mode Toggle) */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => setDarkMode(!darkMode)}
-          className="p-1 hover:bg-accent hover:text-accent-foreground rounded-xs text-muted-foreground transition-colors opacity-85 hover:opacity-100 cursor-pointer"
-          title="Toggle theme"
-        >
-          {darkMode ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-        </button>
-      </div>
+      {fileSummary && (
+        <div className="pointer-events-none absolute left-1/2 max-w-[42vw] -translate-x-1/2 text-muted-foreground">
+          <FileCode className="absolute right-full mr-1.5 size-3.5" aria-hidden="true" />
+          <span
+            className="block truncate text-[11px] font-medium text-foreground select-text"
+            title={fileSummary.name}
+          >
+            {fileSummary.name}
+          </span>
+        </div>
+      )}
+
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setDarkMode(!darkMode)}
+            aria-label="Toggle theme"
+          >
+            {darkMode
+              ? <Sun data-icon="inline-start" className="w-3.5 h-3.5" />
+              : <Moon data-icon="inline-start" className="w-3.5 h-3.5" />}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Toggle theme</TooltipContent>
+      </Tooltip>
     </div>
   )
 }
