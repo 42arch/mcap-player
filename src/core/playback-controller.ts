@@ -3,6 +3,11 @@ import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
 import { PlaybackClock } from './playback-clock'
 
+interface PendingSeekBackfill {
+  generation: number
+  timeNs: bigint
+}
+
 export class PlaybackController {
   private worker: any = null
   private clock: PlaybackClock | null = null
@@ -13,6 +18,9 @@ export class PlaybackController {
   private queryVersion = 0
   private pendingBackfillPanelIds = new Set<string>()
   private backfillScheduled = false
+  private seekGeneration = 0
+  private pendingSeekBackfill: PendingSeekBackfill | null = null
+  private isSeekBackfillRunning = false
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -40,7 +48,6 @@ export class PlaybackController {
     const plan = globalMessagePipeline.getQueryPlan()
     const worker = this.getWorker()
     if (plan.topics.length > 0 && worker) {
-      this.isQuerying = false
       this.queryVersion++
       const version = this.queryVersion
       const isTargetedBackfill = Boolean(panelIds?.length)
@@ -121,7 +128,6 @@ export class PlaybackController {
       return
     }
     this.queryVersion++
-    this.isQuerying = false
     this.clock.seek(ns)
     this.lastTickTimeNs = ns
     usePlayerStore.getState().setElapsedNs(ns - this.fileSummary.startNs)
@@ -129,7 +135,14 @@ export class PlaybackController {
     // Notify visible panel instances before their targeted backfill arrives.
     globalMessagePipeline.emitSeek(ns)
 
-    this.triggerBackfill()
+    const generation = ++this.seekGeneration
+    const worker = this.getWorker()
+    worker?.setSeekGeneration(generation).catch((error: unknown) => {
+      console.error('Error updating seek generation in worker:', error)
+    })
+    // Keep only the most recent queued target while one backfill is running.
+    this.pendingSeekBackfill = { generation, timeNs: ns }
+    void this.processPendingSeekBackfills()
   }
 
   setSpeed(speed: number) {
@@ -160,9 +173,10 @@ export class PlaybackController {
 
       usePlayerStore.getState().setElapsedNs(current - this.fileSummary.startNs)
 
+      const seekBackfillPending = this.isSeekBackfillRunning || this.pendingSeekBackfill !== null
       const plan = globalMessagePipeline.getQueryPlan()
       const worker = this.getWorker()
-      if (plan.topics.length > 0 && current > start && worker) {
+      if (!seekBackfillPending && plan.topics.length > 0 && current > start && worker) {
         if (!this.isQuerying) {
           this.isQuerying = true
           const queryEnd = current
@@ -180,19 +194,70 @@ export class PlaybackController {
               console.error('Error fetching messages in play loop:', err)
             })
             .finally(() => {
-              if (version === this.queryVersion) {
-                this.isQuerying = false
-              }
+              this.isQuerying = false
             })
         }
       }
-      else {
+      else if (!seekBackfillPending) {
         this.lastTickTimeNs = current
       }
 
       this.animationFrameId = requestAnimationFrame(tick)
     }
     this.animationFrameId = requestAnimationFrame(tick)
+  }
+
+  private async processPendingSeekBackfills() {
+    if (this.isSeekBackfillRunning) {
+      return
+    }
+
+    this.isSeekBackfillRunning = true
+    try {
+      while (this.pendingSeekBackfill) {
+        const request = this.pendingSeekBackfill
+        this.pendingSeekBackfill = null
+        const plan = globalMessagePipeline.getQueryPlan()
+        const worker = this.getWorker()
+        if (plan.topics.length === 0 || !worker) {
+          continue
+        }
+
+        try {
+          const fastMessages = await worker.getBackfillMessages(
+            request.timeNs,
+            plan.topics,
+            false,
+            request.generation,
+            'fast',
+          )
+          if (request.generation !== this.seekGeneration) {
+            continue
+          }
+          globalMessagePipeline.dispatchSeekResult(fastMessages)
+
+          const slowMessages = await worker.getBackfillMessages(
+            request.timeNs,
+            plan.topics,
+            false,
+            request.generation,
+            'slow',
+          )
+          if (request.generation === this.seekGeneration) {
+            globalMessagePipeline.dispatchSeekResult(slowMessages)
+            globalMessagePipeline.emitSeekComplete(request.timeNs)
+          }
+        }
+        catch (error) {
+          if (request.generation === this.seekGeneration) {
+            console.error('Error fetching messages after seek:', error)
+          }
+        }
+      }
+    }
+    finally {
+      this.isSeekBackfillRunning = false
+    }
   }
 
   private stopLoop() {

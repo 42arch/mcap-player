@@ -4,7 +4,9 @@ import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'
 import { expose, transfer } from 'comlink'
 import { getValueByPath } from '@/core/parsers/value-extractor'
-import { getTransferableBuffers, MessageCursor } from './message-cursor'
+import { getTransferableBuffers, isSlowBackfillChannel, MessageCursor } from './message-cursor'
+
+type BackfillPhase = 'all' | 'fast' | 'slow'
 
 class McapWorker {
   private reader: McapIndexedReader | null = null
@@ -15,6 +17,7 @@ class McapWorker {
   private lastTopics: string[] = []
   private lastDispatchModes = ''
   private lastEndTimeNs = -1n
+  private latestSeekGeneration = 0
 
   async initialize(file: File) {
     if (!this.decompressHandlers) {
@@ -32,6 +35,7 @@ class McapWorker {
     this.lastTopics = []
     this.lastDispatchModes = ''
     this.lastEndTimeNs = -1n
+    this.latestSeekGeneration = 0
 
     // Extract schemas
     const schemasList = []
@@ -147,24 +151,54 @@ class McapWorker {
     seekTimeNs: bigint,
     topics: string[],
     preservePlaybackCursor = false,
+    seekGeneration?: number,
+    phase: BackfillPhase = 'all',
   ) {
     if (!this.reader) {
       return []
     }
 
-    if (!preservePlaybackCursor) {
-      this.lastTopics = [...topics]
-      this.lastDispatchModes = ''
-      this.lastEndTimeNs = seekTimeNs + 1n // Next tick query should start contiguous with backfill end
+    if (seekGeneration !== undefined) {
+      this.setSeekGeneration(seekGeneration)
     }
+    const isCanceled = () => seekGeneration !== undefined && seekGeneration !== this.latestSeekGeneration
+    const selectedTopics = phase === 'all'
+      ? topics
+      : topics.filter(topic => this.isSlowBackfillTopic(topic) === (phase === 'slow'))
 
     const messages = await this.cursor.getBackfillMessages(
       seekTimeNs,
-      topics,
+      selectedTopics,
       'placeholder',
-      !preservePlaybackCursor,
+      isCanceled,
     )
+    if (isCanceled()) {
+      return []
+    }
+
+    if (!preservePlaybackCursor && phase !== 'fast') {
+      this.lastTopics = [...topics]
+      this.lastDispatchModes = ''
+      this.lastEndTimeNs = seekTimeNs
+    }
     return transfer(messages, getTransferableBuffers(messages))
+  }
+
+  setSeekGeneration(generation: number) {
+    this.latestSeekGeneration = Math.max(this.latestSeekGeneration, generation)
+  }
+
+  private isSlowBackfillTopic(topic: string): boolean {
+    if (!this.reader) {
+      return false
+    }
+    return Array.from(this.reader.channelsById.values()).some((channel) => {
+      if (channel.topic !== topic) {
+        return false
+      }
+      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
+      return isSlowBackfillChannel(topic, schemaName)
+    })
   }
 
   async getFirstMessagePayload(topic: string) {

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { copyBinaryPayload, getTransferableBuffers, sanitizePayload, selectLatestMessages, selectLatestWithSceneUpdates } from './message-cursor'
+import {
+  copyBinaryPayload,
+  getTransferableBuffers,
+  isSlowBackfillChannel,
+  MessageCursor,
+  sanitizePayload,
+  selectLatestMessages,
+  selectLatestWithSceneUpdates,
+} from './message-cursor'
 
 interface Message {
   topic: string
@@ -90,5 +98,148 @@ describe('binary transfer helpers', () => {
     expect(payload.data).toBeInstanceOf(Uint8Array)
     expect(Array.from(payload.data)).toEqual([0, 1, 2])
     expect(payload.data.buffer).not.toBe(source.buffer)
+  })
+})
+
+describe('backfill optimization', () => {
+  it('classifies stateful and compressed topics as slow backfill', () => {
+    expect(isSlowBackfillChannel('/scene', 'foxglove.SceneUpdate')).toBe(true)
+    expect(isSlowBackfillChannel('/tf', 'custom.Transform')).toBe(true)
+    expect(isSlowBackfillChannel('/camera', 'sensor_msgs/CompressedImage')).toBe(true)
+    expect(isSlowBackfillChannel('/points', 'sensor_msgs/PointCloud2')).toBe(false)
+  })
+
+  it('compacts SceneUpdate history into one full update', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = [
+      {
+        channelId: 1,
+        logTime: 1n,
+        publishTime: 1n,
+        sequence: 1,
+        data: encoder.encode(JSON.stringify({
+          entities: [{ id: 'old', cubes: [{ size: { x: 1, y: 1, z: 1 } }] }],
+        })),
+      },
+      {
+        channelId: 1,
+        logTime: 2n,
+        publishTime: 2n,
+        sequence: 2,
+        data: encoder.encode(JSON.stringify({
+          deletions: ['old'],
+          entities: [{ id: 'current', cubes: [{ size: { x: 2, y: 1, z: 1 } }] }],
+        })),
+      },
+    ]
+    const readOptions: Array<{ startTime?: bigint, endTime?: bigint }> = []
+    const reader = {
+      channelsById: new Map([[1, { topic: '/scene', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'foxglove.SceneUpdate',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: (options: { startTime?: bigint, endTime?: bigint }) => (async function* () {
+        readOptions.push(options)
+        yield* rawMessages.filter(message =>
+          (options.startTime === undefined || message.logTime >= options.startTime)
+          && (options.endTime === undefined || message.logTime < options.endTime),
+        )
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    const messages = await cursor.getBackfillMessages(10n, ['/scene'], 'placeholder')
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      topic: '/scene',
+      logTime: 10n,
+      sequence: 2,
+      sceneSnapshot: true,
+    })
+    expect(messages[0].payload.entities).toEqual([
+      expect.objectContaining({ id: 'current' }),
+    ])
+
+    await cursor.getBackfillMessages(20n, ['/scene'], 'placeholder')
+    expect(readOptions[1].startTime).toBe(11n)
+  })
+
+  it('compacts TF history by child frame and reuses its checkpoint', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = [
+      {
+        channelId: 1,
+        logTime: 1n,
+        publishTime: 1n,
+        sequence: 1,
+        data: encoder.encode(JSON.stringify({
+          transforms: [
+            {
+              header: { frame_id: 'base_link' },
+              child_frame_id: 'camera',
+              transform: { translation: { x: 1 }, rotation: { w: 1 } },
+            },
+            {
+              header: { frame_id: 'base_link' },
+              child_frame_id: 'lidar',
+              transform: { translation: { x: 2 }, rotation: { w: 1 } },
+            },
+          ],
+        })),
+      },
+      {
+        channelId: 1,
+        logTime: 2n,
+        publishTime: 2n,
+        sequence: 2,
+        data: encoder.encode(JSON.stringify({
+          transforms: [{
+            header: { frame_id: 'base_link' },
+            child_frame_id: 'camera',
+            transform: { translation: { x: 3 }, rotation: { w: 1 } },
+          }],
+        })),
+      },
+    ]
+    const readOptions: Array<{ startTime?: bigint, endTime?: bigint }> = []
+    const reader = {
+      channelsById: new Map([[1, { topic: '/tf', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'tf2_msgs/TFMessage',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: (options: { startTime?: bigint, endTime?: bigint }) => (async function* () {
+        readOptions.push(options)
+        yield* rawMessages.filter(message =>
+          (options.startTime === undefined || message.logTime >= options.startTime)
+          && (options.endTime === undefined || message.logTime < options.endTime),
+        )
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    const messages = await cursor.getBackfillMessages(10n, ['/tf'], 'placeholder')
+
+    expect(messages).toHaveLength(1)
+    expect(messages[0].transformSnapshot).toBe(true)
+    expect(messages[0].payload.transforms).toEqual([
+      expect.objectContaining({
+        child_frame_id: 'camera',
+        transform: expect.objectContaining({ translation: { x: 3 } }),
+      }),
+      expect.objectContaining({
+        child_frame_id: 'lidar',
+        transform: expect.objectContaining({ translation: { x: 2 } }),
+      }),
+    ])
+
+    await cursor.getBackfillMessages(20n, ['/tf'], 'placeholder')
+    expect(readOptions[1].startTime).toBe(11n)
   })
 })

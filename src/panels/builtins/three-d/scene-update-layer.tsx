@@ -643,6 +643,7 @@ function FrameSceneGroup({
 interface PendingSceneUpdate {
   payload: any
   logTimeNs: bigint
+  replaceState: boolean
 }
 
 function getLogTimeNs(message: any): bigint {
@@ -666,6 +667,7 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
   const pendingUpdatesRef = useRef<PendingSceneUpdate[]>([])
   const sceneStateRef = useRef(new SceneUpdateState())
   const rafIdRef = useRef<number | null>(null)
+  const receivedSinceSeekRef = useRef(true)
   const labelFieldsRef = useRef(labelFields)
   labelFieldsRef.current = labelFields
 
@@ -688,15 +690,15 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
         rafIdRef.current = null
         const updates = pendingUpdatesRef.current.splice(0)
         if (updates.length > 0) {
-          let nextScene = createEmptySceneUpdate()
           for (const update of updates) {
-            nextScene = sceneStateRef.current.apply(
-              update.payload,
-              update.logTimeNs,
-              { labelFields: labelFieldsRef.current },
-            )
+            if (update.replaceState) {
+              sceneStateRef.current.replaceWithFullUpdate(update.payload, update.logTimeNs)
+            }
+            else {
+              sceneStateRef.current.applyMutation(update.payload, update.logTimeNs)
+            }
           }
-          setScene(nextScene)
+          setScene(sceneStateRef.current.snapshot({ labelFields: labelFieldsRef.current }))
         }
       })
     }
@@ -710,21 +712,29 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
       if (!msg || !msg.payload) {
         return
       }
+      receivedSinceSeekRef.current = true
       pendingUpdatesRef.current.push({
         payload: msg.payload,
         logTimeNs: getLogTimeNs(msg),
+        replaceState: msg.sceneSnapshot === true,
       })
       scheduleSceneUpdate()
     })
 
     const unsubSeek = globalMessagePipeline.subscribeSeek(panelId, () => {
+      receivedSinceSeekRef.current = false
+      // Rebuild state from backfill while the last completed scene remains rendered.
       pendingUpdatesRef.current = []
       sceneStateRef.current.clear()
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = null
       }
-      setScene(createEmptySceneUpdate())
+    })
+    const unsubSeekComplete = globalMessagePipeline.subscribeSeekComplete(panelId, () => {
+      if (!receivedSinceSeekRef.current) {
+        setScene(createEmptySceneUpdate())
+      }
     })
 
     return () => {
@@ -734,6 +744,7 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
       }
       unsubTopic()
       unsubSeek()
+      unsubSeekComplete()
     }
   }, [panelId, topic, tfCoordinator])
 

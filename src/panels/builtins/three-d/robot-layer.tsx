@@ -50,6 +50,9 @@ function RobotLinkView({ link, tfCoordinator }: { link: UrdfLink, tfCoordinator:
 /** Renders an in-bag robot_description and drives each link from the TF tree. */
 export function RobotLayer({ panelId, topic, tfCoordinator }: { panelId: string, topic: string, tfCoordinator: FrameTransformCoordinator }) {
   const [robot, setRobot] = useState<UrdfRobot | null>(null)
+  const receivedSinceSeekRef = useRef(true)
+  const lastDescriptionRef = useRef<unknown>(undefined)
+  const hasRobotRef = useRef(false)
 
   useEffect(() => {
     const unsubscribe = globalMessagePipeline.subscribe({
@@ -58,15 +61,34 @@ export function RobotLayer({ panelId, topic, tfCoordinator }: { panelId: string,
       topics: [{ topic, mode: 'latest' }],
     }, (message) => {
       const payload = message.payload as { data?: unknown } | undefined
-      const parsed = parseUrdfRobot(payload?.data)
+      const description = payload?.data
+      if (hasRobotRef.current && Object.is(lastDescriptionRef.current, description)) {
+        receivedSinceSeekRef.current = true
+        return
+      }
+      const parsed = parseUrdfRobot(description)
       if (parsed) {
+        receivedSinceSeekRef.current = true
+        lastDescriptionRef.current = description
+        hasRobotRef.current = true
         setRobot(parsed)
       }
     })
-    const unsubscribeSeek = globalMessagePipeline.subscribeSeek(panelId, () => setRobot(null))
+    // Robot descriptions are retained across seeks and replaced only when data changes.
+    const unsubscribeSeek = globalMessagePipeline.subscribeSeek(panelId, () => {
+      receivedSinceSeekRef.current = false
+    })
+    const unsubscribeSeekComplete = globalMessagePipeline.subscribeSeekComplete(panelId, () => {
+      if (!receivedSinceSeekRef.current) {
+        lastDescriptionRef.current = undefined
+        hasRobotRef.current = false
+        setRobot(null)
+      }
+    })
     return () => {
       unsubscribe()
       unsubscribeSeek()
+      unsubscribeSeekComplete()
     }
   }, [panelId, topic])
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MessagePipeline } from './message-pipeline'
 
 function message(topic: string, sequence: number) {
@@ -14,6 +14,10 @@ function message(topic: string, sequence: number) {
 }
 
 describe('messagePipeline', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   it('routes messages only to the panel instance that declared the topic', () => {
     const pipeline = new MessagePipeline()
     const imageMessages: string[] = []
@@ -72,5 +76,49 @@ describe('messagePipeline', () => {
     pipeline.clearPanel('three-d')
 
     expect(pipeline.getQueryPlan()).toEqual({ topics: [], modeByTopic: {} })
+  })
+
+  it('drops a pending latest message when seeking before its frame flush', () => {
+    let scheduledFrame: FrameRequestCallback | undefined
+    const cancelAnimationFrame = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      scheduledFrame = callback
+      return 1
+    })
+    vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrame)
+
+    const pipeline = new MessagePipeline()
+    const received: number[] = []
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'points',
+      topics: [{ topic: '/points', mode: 'latest' }],
+    }, event => received.push(event.sequence))
+
+    pipeline.dispatch([message('/points', 1)])
+    pipeline.emitSeek(10n)
+    scheduledFrame?.(0)
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(1)
+    expect(received).toEqual([])
+  })
+
+  it('flushes latest seek results before notifying seek completion', () => {
+    vi.stubGlobal('requestAnimationFrame', () => 1)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const pipeline = new MessagePipeline()
+    const events: string[] = []
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'points',
+      topics: [{ topic: '/points', mode: 'latest' }],
+    }, event => events.push(`message:${event.sequence}`))
+    pipeline.subscribeSeekComplete('three-d', () => events.push('complete'))
+
+    pipeline.dispatchSeekResult([message('/points', 2)])
+    pipeline.emitSeekComplete(20n)
+
+    expect(events).toEqual(['message:2', 'complete'])
   })
 })

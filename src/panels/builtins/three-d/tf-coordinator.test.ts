@@ -75,4 +75,34 @@ describe('frameTransformCoordinator', () => {
 
     expect(hand.position.toArray()).toEqual([1, 2, 0])
   })
+
+  it('replaces stale transforms when consuming a seek snapshot', () => {
+    const coordinator = new FrameTransformCoordinator()
+    const camera = new THREE.Group()
+    coordinator.registerFrameTarget(camera, 'camera')
+
+    coordinator.consume({
+      parent_frame_id: 'base_link',
+      child_frame_id: 'camera',
+      translation: { x: 5, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    })
+    expect(camera.position.x).toBeCloseTo(5)
+
+    coordinator.consume({
+      parent_frame_id: 'base_link',
+      child_frame_id: 'lidar',
+      translation: { x: 8, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, true)
+    expect(camera.position.toArray()).toEqual([0, 0, 0])
+
+    coordinator.consume({
+      parent_frame_id: 'base_link',
+      child_frame_id: 'camera',
+      translation: { x: 2, y: 1, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, true)
+    expect(camera.position.toArray()).toEqual([2, 1, 0])
+  })
 })

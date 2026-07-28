@@ -4,6 +4,7 @@ import { MessageReader as Ros2Reader } from '@foxglove/rosmsg2-serialization'
 import { MessageReader as Ros1Reader } from '@foxglove/rosmsg-serialization'
 import protobuf from 'protobufjs'
 import { checkH264IsKeyframe, isH264Format } from '@/core/parsers/h264'
+import { SceneUpdateState } from '@/core/parsers/scene-update-parser'
 import 'protobufjs/ext/descriptor'
 
 export interface DecodedMessage {
@@ -14,14 +15,130 @@ export interface DecodedMessage {
   sequence: number
   dataLength: number
   payload: any
+  sceneSnapshot?: boolean
+  transformSnapshot?: boolean
 }
 
 export type DispatchMode = 'latest' | 'all'
 export type DispatchModeByTopic = Record<string, DispatchMode>
 
+export function isSlowBackfillChannel(topic: string, schemaName: string): boolean {
+  const normalizedTopic = topic.toLowerCase()
+  const normalizedSchema = schemaName.toLowerCase()
+  return normalizedTopic === '/tf'
+    || normalizedTopic === '/tf_static'
+    || normalizedSchema.includes('sceneupdate')
+    || normalizedSchema.includes('scene_update')
+    || normalizedSchema.includes('frametransform')
+    || normalizedSchema.includes('frame_transform')
+    || normalizedSchema.includes('tfmessage')
+    || normalizedSchema.includes('tf_message')
+    || normalizedSchema.includes('compressedimage')
+    || normalizedSchema.includes('compressed_image')
+    || normalizedSchema.includes('compressedvideo')
+    || normalizedSchema.includes('compressed_video')
+}
+
+function compareDecodedMessages(a: DecodedMessage, b: DecodedMessage): number {
+  if (a.logTime !== b.logTime) {
+    return a.logTime < b.logTime ? -1 : 1
+  }
+  if (a.transformSnapshot !== b.transformSnapshot) {
+    return a.transformSnapshot ? -1 : 1
+  }
+  return a.sequence - b.sequence
+}
+
 interface BufferedMessage {
   message: any
   dataLength: number
+}
+
+interface BackfillCheckpoint<T> {
+  timeNs: bigint
+  resumeTimeNs: bigint
+  state: T
+  lastMessage: DecodedMessage
+  lastUsed: number
+}
+
+const STATE_CHECKPOINT_INTERVAL_NS = 30_000_000_000n
+const MAX_STATE_CHECKPOINTS_PER_TOPIC = 64
+
+function getSingleTransformChildFrame(payload: any): string {
+  const value = payload?.child_frame_id || payload?.childFrameId
+  return typeof value === 'string' ? value : ''
+}
+
+function getBatchTransformChildFrame(transform: any): string {
+  const value = transform?.child_frame_id || transform?.childFrameId
+  return typeof value === 'string' ? value : ''
+}
+
+class TransformUpdateState {
+  private transformsByChild = new Map<string, any>()
+  private batchTemplate: any = null
+  private usesBatchPayload = false
+
+  clone(): TransformUpdateState {
+    const clone = new TransformUpdateState()
+    clone.transformsByChild = new Map(this.transformsByChild)
+    clone.batchTemplate = this.batchTemplate
+    clone.usesBatchPayload = this.usesBatchPayload
+    return clone
+  }
+
+  apply(payload: any): void {
+    const singleChild = getSingleTransformChildFrame(payload)
+    if (singleChild) {
+      this.transformsByChild.set(singleChild, payload)
+      return
+    }
+    if (!Array.isArray(payload?.transforms)) {
+      return
+    }
+    this.usesBatchPayload = true
+    this.batchTemplate = payload
+    for (const transform of payload.transforms) {
+      const child = getBatchTransformChildFrame(transform)
+      if (child) {
+        this.transformsByChild.set(child, transform)
+      }
+    }
+  }
+
+  toSnapshotMessages(lastMessage: DecodedMessage, seekTimeNs: bigint): DecodedMessage[] {
+    if (this.usesBatchPayload) {
+      return [{
+        ...lastMessage,
+        logTime: seekTimeNs,
+        publishTime: seekTimeNs,
+        dataLength: 0,
+        payload: {
+          ...this.batchTemplate,
+          transforms: Array.from(this.transformsByChild.values()),
+        },
+      }]
+    }
+
+    const transforms = Array.from(this.transformsByChild.values())
+    if (transforms.length === 0) {
+      return [{
+        ...lastMessage,
+        logTime: seekTimeNs,
+        publishTime: seekTimeNs,
+        dataLength: 0,
+      }]
+    }
+    return transforms.map((payload, index) => ({
+      ...lastMessage,
+      logTime: seekTimeNs,
+      publishTime: seekTimeNs,
+      sequence: lastMessage.sequence + index,
+      dataLength: 0,
+      payload,
+    }))
+  }
 }
 
 export function copyBinaryPayload(value: ArrayBufferView): Uint8Array {
@@ -170,11 +287,17 @@ export class MessageCursor {
 
   // Deserializer cache
   private deserializerCache = new Map<number, (data: Uint8Array) => any>()
+  private sceneCheckpoints = new Map<string, BackfillCheckpoint<SceneUpdateState>[]>()
+  private transformCheckpoints = new Map<string, BackfillCheckpoint<TransformUpdateState>[]>()
+  private checkpointAccess = 0
 
   setReader(reader: McapIndexedReader | null) {
     this.reader = reader
     this.clear()
     this.deserializerCache.clear()
+    this.sceneCheckpoints.clear()
+    this.transformCheckpoints.clear()
+    this.checkpointAccess = 0
   }
 
   clear() {
@@ -441,43 +564,239 @@ export class MessageCursor {
     })
   }
 
+  private isTransformTopic(topic: string): boolean {
+    if (!this.reader) {
+      return false
+    }
+    const normalizedTopic = topic.toLowerCase()
+    if (normalizedTopic === '/tf' || normalizedTopic === '/tf_static') {
+      return true
+    }
+    return Array.from(this.reader.channelsById.values()).some((channel) => {
+      if (channel.topic !== topic) {
+        return false
+      }
+      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
+      return schemaName.includes('frametransform')
+        || schemaName.includes('frame_transform')
+        || schemaName.includes('tfmessage')
+        || schemaName.includes('tf_message')
+    })
+  }
+
+  private findCheckpoint<T>(
+    cache: Map<string, BackfillCheckpoint<T>[]>,
+    topic: string,
+    seekTimeNs: bigint,
+  ): BackfillCheckpoint<T> | undefined {
+    let nearest: BackfillCheckpoint<T> | undefined
+    for (const checkpoint of cache.get(topic) || []) {
+      if (
+        checkpoint.timeNs <= seekTimeNs
+        && (!nearest || checkpoint.timeNs > nearest.timeNs)
+      ) {
+        nearest = checkpoint
+      }
+    }
+    if (nearest) {
+      nearest.lastUsed = ++this.checkpointAccess
+    }
+    return nearest
+  }
+
+  private storeCheckpoint<T>(
+    cache: Map<string, BackfillCheckpoint<T>[]>,
+    topic: string,
+    checkpoint: Omit<BackfillCheckpoint<T>, 'lastUsed'>,
+  ): void {
+    let checkpoints = cache.get(topic)
+    if (!checkpoints) {
+      checkpoints = []
+      cache.set(topic, checkpoints)
+    }
+    const existingIndex = checkpoints.findIndex(item => item.timeNs === checkpoint.timeNs)
+    const next = { ...checkpoint, lastUsed: ++this.checkpointAccess }
+    if (existingIndex >= 0) {
+      checkpoints[existingIndex] = next
+      return
+    }
+    checkpoints.push(next)
+    if (checkpoints.length <= MAX_STATE_CHECKPOINTS_PER_TOPIC) {
+      return
+    }
+    let leastRecentlyUsedIndex = 0
+    for (let index = 1; index < checkpoints.length; index++) {
+      if (checkpoints[index].lastUsed < checkpoints[leastRecentlyUsedIndex].lastUsed) {
+        leastRecentlyUsedIndex = index
+      }
+    }
+    checkpoints.splice(leastRecentlyUsedIndex, 1)
+  }
+
+  private async getSceneBackfillSnapshot(
+    topic: string,
+    seekTimeNs: bigint,
+    isCanceled: () => boolean,
+  ): Promise<DecodedMessage[]> {
+    if (!this.reader) {
+      return []
+    }
+    const checkpoint = this.findCheckpoint(this.sceneCheckpoints, topic, seekTimeNs)
+    const state = checkpoint?.state.clone() || new SceneUpdateState()
+    let lastMessage = checkpoint?.lastMessage
+    let lastCheckpointTimeNs = checkpoint?.timeNs
+    const iterator = this.reader.readMessages({
+      ...(checkpoint ? { startTime: checkpoint.resumeTimeNs } : {}),
+      endTime: seekTimeNs + 1n,
+      topics: [topic],
+    })
+
+    for await (const rawMessage of iterator) {
+      if (isCanceled()) {
+        return []
+      }
+      const decoded = this.decodeMessage(rawMessage)
+      if (!decoded) {
+        continue
+      }
+      if (
+        lastMessage
+        && lastCheckpointTimeNs !== undefined
+        && decoded.logTime > lastMessage.logTime
+        && decoded.logTime - lastCheckpointTimeNs >= STATE_CHECKPOINT_INTERVAL_NS
+      ) {
+        const boundaryTimeNs = decoded.logTime > 0n ? decoded.logTime - 1n : 0n
+        this.storeCheckpoint(this.sceneCheckpoints, topic, {
+          timeNs: boundaryTimeNs,
+          resumeTimeNs: decoded.logTime,
+          state: state.clone(),
+          lastMessage,
+        })
+        lastCheckpointTimeNs = boundaryTimeNs
+      }
+      state.applyMutation(decoded.payload, decoded.logTime)
+      lastMessage = decoded
+      lastCheckpointTimeNs ??= decoded.logTime
+    }
+
+    if (!lastMessage || isCanceled()) {
+      return []
+    }
+    state.advanceTo(seekTimeNs)
+    this.storeCheckpoint(this.sceneCheckpoints, topic, {
+      timeNs: seekTimeNs,
+      resumeTimeNs: seekTimeNs + 1n,
+      state: state.clone(),
+      lastMessage,
+    })
+    return [{
+      ...lastMessage,
+      logTime: seekTimeNs,
+      publishTime: seekTimeNs,
+      dataLength: 0,
+      payload: state.toFullUpdate(seekTimeNs),
+      sceneSnapshot: true,
+    }]
+  }
+
+  private async getTransformBackfillSnapshot(
+    topic: string,
+    seekTimeNs: bigint,
+    isCanceled: () => boolean,
+  ): Promise<DecodedMessage[]> {
+    if (!this.reader) {
+      return []
+    }
+    const checkpoint = this.findCheckpoint(this.transformCheckpoints, topic, seekTimeNs)
+    const state = checkpoint?.state.clone() || new TransformUpdateState()
+    let lastMessage = checkpoint?.lastMessage
+    let lastCheckpointTimeNs = checkpoint?.timeNs
+    const iterator = this.reader.readMessages({
+      ...(checkpoint ? { startTime: checkpoint.resumeTimeNs } : {}),
+      endTime: seekTimeNs + 1n,
+      topics: [topic],
+    })
+
+    for await (const rawMessage of iterator) {
+      if (isCanceled()) {
+        return []
+      }
+      const decoded = this.decodeMessage(rawMessage)
+      if (!decoded) {
+        continue
+      }
+      if (
+        lastMessage
+        && lastCheckpointTimeNs !== undefined
+        && decoded.logTime > lastMessage.logTime
+        && decoded.logTime - lastCheckpointTimeNs >= STATE_CHECKPOINT_INTERVAL_NS
+      ) {
+        const boundaryTimeNs = decoded.logTime > 0n ? decoded.logTime - 1n : 0n
+        this.storeCheckpoint(this.transformCheckpoints, topic, {
+          timeNs: boundaryTimeNs,
+          resumeTimeNs: decoded.logTime,
+          state: state.clone(),
+          lastMessage,
+        })
+        lastCheckpointTimeNs = boundaryTimeNs
+      }
+      state.apply(decoded.payload)
+      lastMessage = decoded
+      lastCheckpointTimeNs ??= decoded.logTime
+    }
+
+    if (!lastMessage || isCanceled()) {
+      return []
+    }
+    this.storeCheckpoint(this.transformCheckpoints, topic, {
+      timeNs: seekTimeNs,
+      resumeTimeNs: seekTimeNs + 1n,
+      state: state.clone(),
+      lastMessage,
+    })
+    return state.toSnapshotMessages(lastMessage, seekTimeNs)
+  }
+
   async getBackfillMessages(
     seekTimeNs: bigint,
     topics: string[],
     binaryFormat: 'placeholder' | 'hex' | 'raw',
-    resetCursor = true,
+    isCanceled: () => boolean = () => false,
   ): Promise<DecodedMessage[]> {
-    // A seek replaces playback state; a newly opened panel can instead query
-    // history without disturbing the shared forward playback cursor.
-    if (resetCursor) {
-      this.reset(seekTimeNs, topics, binaryFormat)
-    }
-
-    if (!this.reader || topics.length === 0) {
+    if (!this.reader || topics.length === 0 || isCanceled()) {
       return []
     }
+    this.binaryFormat = binaryFormat
 
     const messages: DecodedMessage[] = []
     const sceneUpdateTopics = topics.filter(topic => this.isSceneUpdateTopic(topic))
-    const topicsRemaining = new Set(topics.filter(topic => !sceneUpdateTopics.includes(topic)))
+    const transformTopics = topics.filter(topic => this.isTransformTopic(topic))
+    const statefulTopics = new Set([...sceneUpdateTopics, ...transformTopics])
+    const topicsRemaining = new Set(topics.filter(topic => !statefulTopics.has(topic)))
 
-    // SceneUpdate is a stateful stream. Replay its history up to the seek point
-    // so a newly mounted layer can reconstruct entity additions and deletions.
-    if (sceneUpdateTopics.length > 0) {
-      const sceneIterator = this.reader.readMessages({
-        endTime: seekTimeNs + 1n,
-        topics: sceneUpdateTopics,
-      })
-      for await (const msg of sceneIterator) {
-        const decoded = this.decodeMessage(msg)
-        if (decoded) {
-          messages.push(decoded)
-        }
+    // Rebuild SceneUpdate state in the worker and return one full replacement
+    // instead of transferring every historical mutation to the main thread.
+    for (const topic of sceneUpdateTopics) {
+      messages.push(...await this.getSceneBackfillSnapshot(topic, seekTimeNs, isCanceled))
+      if (isCanceled()) {
+        return []
       }
     }
 
+    const transformMessages: DecodedMessage[] = []
+    for (const topic of transformTopics) {
+      transformMessages.push(...await this.getTransformBackfillSnapshot(topic, seekTimeNs, isCanceled))
+      if (isCanceled()) {
+        return []
+      }
+    }
+    if (transformMessages.length > 0) {
+      transformMessages[0].transformSnapshot = true
+      messages.push(...transformMessages)
+    }
+
     if (topicsRemaining.size === 0) {
-      return messages.sort((a, b) => a.logTime === b.logTime ? a.sequence - b.sequence : a.logTime < b.logTime ? -1 : 1)
+      return messages.sort(compareDecodedMessages)
     }
 
     // Query backward to get latest historical messages
@@ -490,6 +809,9 @@ export class MessageCursor {
     const topicMessagesMap = new Map<string, DecodedMessage[]>()
 
     for await (const msg of backfillIterator) {
+      if (isCanceled()) {
+        return []
+      }
       const channel = this.reader.channelsById.get(msg.channelId)
       if (!channel) {
         continue
@@ -538,6 +860,9 @@ export class MessageCursor {
       messages.push(...list)
     }
 
-    return messages.sort((a, b) => a.logTime === b.logTime ? a.sequence - b.sequence : a.logTime < b.logTime ? -1 : 1)
+    if (isCanceled()) {
+      return []
+    }
+    return messages.sort(compareDecodedMessages)
   }
 }

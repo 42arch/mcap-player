@@ -132,12 +132,28 @@ function getLifetimeNs(entity: any): bigint | null {
  */
 export class SceneUpdateState {
   private entities = new Map<string, StoredEntity>()
+  private nextExpirationNs: bigint | null = null
 
   clear() {
     this.entities.clear()
+    this.nextExpirationNs = null
+  }
+
+  clone(): SceneUpdateState {
+    const clone = new SceneUpdateState()
+    clone.entities = new Map(
+      Array.from(this.entities, ([id, entry]) => [id, { ...entry }] as const),
+    )
+    clone.nextExpirationNs = this.nextExpirationNs
+    return clone
   }
 
   apply(payload: any, logTimeNs: bigint, options?: SceneUpdateParseOptions): ParsedSceneUpdate {
+    this.applyMutation(payload, logTimeNs)
+    return this.snapshot(options)
+  }
+
+  applyMutation(payload: any, logTimeNs: bigint): void {
     this.removeExpired(logTimeNs)
 
     for (const id of Array.isArray(payload?.deletions) ? payload.deletions : []) {
@@ -158,10 +174,43 @@ export class SceneUpdateState {
       }
       else {
         this.entities.set(entity.id, { entity, expiresAtNs })
+        if (
+          expiresAtNs !== null
+          && (this.nextExpirationNs === null || expiresAtNs < this.nextExpirationNs)
+        ) {
+          this.nextExpirationNs = expiresAtNs
+        }
       }
     }
+  }
 
-    return this.snapshot(options)
+  replaceWithFullUpdate(payload: any, logTimeNs: bigint): void {
+    this.clear()
+    this.applyMutation(payload, logTimeNs)
+  }
+
+  advanceTo(logTimeNs: bigint): void {
+    this.removeExpired(logTimeNs)
+  }
+
+  toFullUpdate(logTimeNs: bigint): { entities: any[] } {
+    this.advanceTo(logTimeNs)
+    return {
+      entities: Array.from(this.entities.values(), ({ entity, expiresAtNs }) => {
+        if (expiresAtNs === null) {
+          return entity
+        }
+        const remainingNs = expiresAtNs - logTimeNs
+        return {
+          ...entity,
+          lifetime: {
+            ...entity.lifetime,
+            sec: (remainingNs / 1_000_000_000n).toString(),
+            nsec: Number(remainingNs % 1_000_000_000n),
+          },
+        }
+      }),
+    }
   }
 
   snapshot(options?: SceneUpdateParseOptions): ParsedSceneUpdate {
@@ -172,11 +221,22 @@ export class SceneUpdateState {
   }
 
   private removeExpired(logTimeNs: bigint) {
+    if (this.nextExpirationNs === null || this.nextExpirationNs > logTimeNs) {
+      return
+    }
+    let nextExpirationNs: bigint | null = null
     for (const [id, entry] of this.entities) {
       if (entry.expiresAtNs !== null && entry.expiresAtNs <= logTimeNs) {
         this.entities.delete(id)
       }
+      else if (
+        entry.expiresAtNs !== null
+        && (nextExpirationNs === null || entry.expiresAtNs < nextExpirationNs)
+      ) {
+        nextExpirationNs = entry.expiresAtNs
+      }
     }
+    this.nextExpirationNs = nextExpirationNs
   }
 }
 

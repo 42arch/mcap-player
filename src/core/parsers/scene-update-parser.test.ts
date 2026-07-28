@@ -146,4 +146,37 @@ describe('parseSceneUpdate', () => {
     expect(state.snapshot({ labelFields: ['metadata.category'] }).texts[0].text)
       .toBe('human.pedestrian')
   })
+
+  it('exports a full update with lifetime relative to the snapshot time', () => {
+    const source = new SceneUpdateState()
+    const start = 1_000_000_000n
+    source.applyMutation({
+      entities: [{
+        id: 'temporary',
+        cubes: [{ size: { x: 1, y: 1, z: 1 } }],
+        lifetime: { sec: 2, nsec: 0 },
+      }],
+    }, start)
+
+    const snapshotTime = start + 500_000_000n
+    const checkpoint = source.clone()
+    source.applyMutation({ deletions: ['temporary'] }, snapshotTime)
+    expect(checkpoint.snapshot().cubes).toHaveLength(1)
+
+    const fullUpdate = checkpoint.toFullUpdate(snapshotTime)
+    expect(fullUpdate.entities[0].lifetime).toEqual({ sec: '1', nsec: 500_000_000 })
+
+    const restored = new SceneUpdateState()
+    restored.applyMutation({
+      entities: [{
+        id: 'stale',
+        cubes: [{ size: { x: 10, y: 10, z: 10 } }],
+      }],
+    }, 0n)
+    restored.replaceWithFullUpdate(fullUpdate, snapshotTime)
+    expect(restored.snapshot().cubes).toHaveLength(1)
+
+    restored.advanceTo(start + 2_000_000_000n)
+    expect(restored.snapshot().cubes).toHaveLength(0)
+  })
 })

@@ -16,6 +16,7 @@ export function GridLayer({ panelId, topic, tfCoordinator }: GridLayerProps) {
   const frameGroupRef = useRef<THREE.Group>(null)
   const lastPayloadRef = useRef<unknown>(null)
   const rafIdRef = useRef<number | null>(null)
+  const receivedSinceSeekRef = useRef(true)
 
   const texture = useMemo(() => {
     if (!grid) {
@@ -74,16 +75,23 @@ export function GridLayer({ panelId, topic, tfCoordinator }: GridLayerProps) {
       if (!message?.payload) {
         return
       }
+      receivedSinceSeekRef.current = true
       lastPayloadRef.current = message.payload
       scheduleUpdate()
     })
     const unsubscribeSeek = globalMessagePipeline.subscribeSeek(panelId, () => {
+      receivedSinceSeekRef.current = false
+      // Drop queued pre-seek data, but keep the rendered grid until replacement data arrives.
       lastPayloadRef.current = null
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current)
         rafIdRef.current = null
       }
-      setGrid(null)
+    })
+    const unsubscribeSeekComplete = globalMessagePipeline.subscribeSeekComplete(panelId, () => {
+      if (!receivedSinceSeekRef.current) {
+        setGrid(null)
+      }
     })
 
     return () => {
@@ -93,6 +101,7 @@ export function GridLayer({ panelId, topic, tfCoordinator }: GridLayerProps) {
       }
       unsubscribeTopic()
       unsubscribeSeek()
+      unsubscribeSeekComplete()
     }
   }, [panelId, topic])
 

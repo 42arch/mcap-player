@@ -324,7 +324,7 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
   })
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-background p-3">
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-background p-3">
       <div className="mcap-panel-card flex-1 flex flex-col border border-border bg-card rounded-lg overflow-hidden shadow-xs">
         <PanelContentHeader
           icon={ImageIcon}
@@ -356,18 +356,18 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
         {/* Content Body */}
         {imageChannels.length === 0
           ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-card">
+              <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
                 <p className="text-xs font-semibold">No Image Channels Available</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
+                <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
                   No topics with schema type matching sensor_msgs/Image or sensor_msgs/CompressedImage were found in this file.
                 </p>
               </div>
             )
           : !activeTopic
               ? (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-card">
+                  <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
                     <p className="text-xs font-semibold">No Topic Selected</p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
+                    <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
                       Please select an active camera topic from the dropdown selector in the header to view the frame.
                     </p>
                   </div>

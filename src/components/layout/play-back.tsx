@@ -1,4 +1,5 @@
 import { FastForward, Pause, Play, Rewind } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -11,6 +12,8 @@ import { usePlaybackControls } from '@/hooks/use-playback'
 import { formatDuration } from '@/lib/time'
 
 export default function PlayBack() {
+  const [scrubSeconds, setScrubSeconds] = useState<number | null>(null)
+  const isPointerScrubbingRef = useRef(false)
   const {
     isPlaying,
     setIsPlaying,
@@ -23,8 +26,18 @@ export default function PlayBack() {
     durationSeconds,
   } = usePlaybackControls()
 
-  const elapsedNs = BigInt(Math.round(elapsedSeconds * 1_000_000_000))
+  const displayedSeconds = scrubSeconds ?? elapsedSeconds
+  const elapsedNs = BigInt(Math.round(displayedSeconds * 1_000_000_000))
   const durationNs = BigInt(Math.round(durationSeconds * 1_000_000_000))
+
+  const commitPointerScrub = (value: string) => {
+    if (!isPointerScrubbingRef.current) {
+      return
+    }
+    isPointerScrubbingRef.current = false
+    setScrubSeconds(null)
+    seekTo(Number.parseFloat(value))
+  }
 
   return (
     <div className="h-full flex items-center justify-between px-4 bg-card text-card-foreground">
@@ -72,8 +85,25 @@ export default function PlayBack() {
           min={0}
           max={durationSeconds || 1}
           step={0.001}
-          value={elapsedSeconds}
-          onChange={e => seekTo(Number.parseFloat(e.target.value))}
+          value={displayedSeconds}
+          onPointerDown={(event) => {
+            isPointerScrubbingRef.current = true
+            setScrubSeconds(Number.parseFloat(event.currentTarget.value))
+          }}
+          onPointerUp={event => commitPointerScrub(event.currentTarget.value)}
+          onPointerCancel={() => {
+            isPointerScrubbingRef.current = false
+            setScrubSeconds(null)
+          }}
+          onChange={(event) => {
+            const value = Number.parseFloat(event.currentTarget.value)
+            if (isPointerScrubbingRef.current) {
+              setScrubSeconds(value)
+            }
+            else {
+              seekTo(value)
+            }
+          }}
           disabled={durationSeconds === 0}
           className="w-full h-1 bg-border rounded-lg appearance-none cursor-pointer accent-primary focus:outline-hidden disabled:opacity-40 disabled:cursor-not-allowed transition-all"
         />

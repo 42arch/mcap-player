@@ -131,7 +131,7 @@ export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMess
   const channels = fileSummary?.channels || []
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-background p-3">
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-background p-3">
       <div className="mcap-panel-card flex-1 flex flex-col border border-border bg-card rounded-lg overflow-hidden shadow-xs">
         <PanelContentHeader
           icon={Radio}

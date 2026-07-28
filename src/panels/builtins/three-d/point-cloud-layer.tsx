@@ -18,6 +18,7 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
   const geometryRef = useRef<THREE.BufferGeometry>(null)
   const lastPayloadRef = useRef<any>(null)
   const unregisterFrameRef = useRef<(() => void) | null>(null)
+  const receivedSinceSeekRef = useRef(true)
 
   const [threeDSettings] = usePanelConfigForId<ThreeDPanelConfig>(panelId)
   const colorMode = threeDSettings.colorMode
@@ -126,6 +127,7 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
         return
       }
 
+      receivedSinceSeekRef.current = true
       lastPayloadRef.current = msg.payload
       const frameId = msg.payload.frame_id || msg.payload.header?.frame_id
       if (typeof frameId === 'string' && frameId) {
@@ -134,19 +136,24 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
       renderPayload(msg.payload)
     })
 
+    // The current point cloud intentionally remains visible until backfill replaces it.
     const unsubSeek = globalMessagePipeline.subscribeSeek(panelId, () => {
-      if (geometryRef.current) {
-        geometryRef.current.setDrawRange(0, 0)
+      receivedSinceSeekRef.current = false
+    })
+    const unsubSeekComplete = globalMessagePipeline.subscribeSeekComplete(panelId, () => {
+      if (receivedSinceSeekRef.current) {
+        return
       }
+      geometryRef.current?.setDrawRange(0, 0)
       lastPayloadRef.current = null
       onPointCountUpdateRef.current(topic, 0)
     })
-
     return () => {
       unregisterFrameRef.current?.()
       unregisterFrameRef.current = null
       unsub()
       unsubSeek()
+      unsubSeekComplete()
       onPointCountUpdateRef.current(topic, 0)
     }
   }, [panelId, topic, tfCoordinator])

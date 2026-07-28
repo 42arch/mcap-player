@@ -51,27 +51,35 @@ export class FrameTransformCoordinator {
   private targets = new Map<THREE.Object3D, string>()
   private legacyLidarMatchers = new Map<THREE.Object3D, (frameId: string) => boolean>()
   private rootFrameId = 'base_link'
+  private receivedSinceSeek = true
 
   constructor(private readonly panelId = 'standalone') {}
 
   connect(topics: readonly string[] = ['/tf']) {
     this.disconnectSubscriptions()
+    this.unsubscribers.push(globalMessagePipeline.subscribeSeek(this.panelId, () => {
+      this.receivedSinceSeek = false
+    }))
+    this.unsubscribers.push(globalMessagePipeline.subscribeSeekComplete(this.panelId, () => {
+      if (!this.receivedSinceSeek) {
+        this.clearTransformState()
+      }
+    }))
     for (const topic of new Set(topics)) {
       this.unsubscribers.push(globalMessagePipeline.subscribe({
         panelId: this.panelId,
         subscriptionId: `tf:${topic}`,
         topics: [{ topic, mode: 'all' }],
       }, (message: any) => {
-        this.consume(message?.payload)
+        this.receivedSinceSeek = true
+        this.consume(message?.payload, message?.transformSnapshot === true)
       }))
     }
   }
 
   disconnect() {
     this.disconnectSubscriptions()
-    this.transformsByChild.clear()
-    this.parentByChild.clear()
-    this.childrenByParent.clear()
+    this.clearTransformState()
     this.targets.clear()
     this.legacyLidarMatchers.clear()
   }
@@ -114,7 +122,10 @@ export class FrameTransformCoordinator {
     }
   }
 
-  consume(payload: any) {
+  consume(payload: any, replaceState = false) {
+    if (replaceState) {
+      this.clearTransformState()
+    }
     let hasChanges = false
     for (const transform of extractTransforms(payload)) {
       const parent = normalizeFrameId(transform.parentFrameId)
@@ -150,6 +161,18 @@ export class FrameTransformCoordinator {
     }
     if (hasChanges) {
       this.updateTargets()
+    }
+  }
+
+  private clearTransformState() {
+    this.transformsByChild.clear()
+    this.parentByChild.clear()
+    this.childrenByParent.clear()
+    for (const object of this.targets.keys()) {
+      object.position.set(0, 0, 0)
+      object.quaternion.identity()
+      object.scale.set(1, 1, 1)
+      object.updateMatrix()
     }
   }
 

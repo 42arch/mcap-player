@@ -8,6 +8,8 @@ export interface PlaybackMessage {
   sequence: number
   dataLength: number
   payload: unknown
+  sceneSnapshot?: boolean
+  transformSnapshot?: boolean
 }
 
 export interface TopicSubscription {
@@ -36,6 +38,7 @@ export class MessagePipeline {
   private subscriptions = new Map<string, SubscriptionRecord>()
   private changeListeners = new Set<(panelId: string) => void>()
   private seekListeners = new Map<string, Set<(timeNs: bigint) => void>>()
+  private seekCompleteListeners = new Map<string, Set<(timeNs: bigint) => void>>()
 
   subscribe(options: PanelSubscriptionOptions, listener: (message: PlaybackMessage) => void): () => void {
     const key = `${options.panelId}:${options.subscriptionId}`
@@ -74,6 +77,22 @@ export class MessagePipeline {
     }
   }
 
+  subscribeSeekComplete(panelId: string, listener: (timeNs: bigint) => void): () => void {
+    let listeners = this.seekCompleteListeners.get(panelId)
+    if (!listeners) {
+      listeners = new Set()
+      this.seekCompleteListeners.set(panelId, listeners)
+    }
+    listeners.add(listener)
+    return () => {
+      const current = this.seekCompleteListeners.get(panelId)
+      current?.delete(listener)
+      if (current?.size === 0) {
+        this.seekCompleteListeners.delete(panelId)
+      }
+    }
+  }
+
   clearPanel(panelId: string) {
     let changed = false
     for (const [key, subscription] of this.subscriptions) {
@@ -83,6 +102,7 @@ export class MessagePipeline {
       }
     }
     this.seekListeners.delete(panelId)
+    this.seekCompleteListeners.delete(panelId)
     if (changed) {
       this.notifySubscriptionChange(panelId)
     }
@@ -96,8 +116,28 @@ export class MessagePipeline {
     this.dispatchMatching(messages, panelId)
   }
 
+  dispatchSeekResult(messages: readonly PlaybackMessage[]) {
+    this.dispatchMatching(messages)
+    for (const subscription of this.subscriptions.values()) {
+      this.flushLatest(subscription)
+    }
+  }
+
   emitSeek(timeNs: bigint) {
+    for (const subscription of this.subscriptions.values()) {
+      if (subscription.frameId !== null) {
+        cancelAnimationFrame(subscription.frameId)
+        subscription.frameId = null
+      }
+      subscription.pendingLatest.clear()
+    }
     for (const listeners of this.seekListeners.values()) {
+      listeners.forEach(listener => listener(timeNs))
+    }
+  }
+
+  emitSeekComplete(timeNs: bigint) {
+    for (const listeners of this.seekCompleteListeners.values()) {
       listeners.forEach(listener => listener(timeNs))
     }
   }
@@ -146,10 +186,22 @@ export class MessagePipeline {
     }
     subscription.frameId = requestAnimationFrame(() => {
       subscription.frameId = null
-      const pending = Array.from(subscription.pendingLatest.values())
-      subscription.pendingLatest.clear()
-      pending.forEach(message => subscription.listener(message))
+      this.deliverPendingLatest(subscription)
     })
+  }
+
+  private flushLatest(subscription: SubscriptionRecord) {
+    if (subscription.frameId !== null) {
+      cancelAnimationFrame(subscription.frameId)
+      subscription.frameId = null
+    }
+    this.deliverPendingLatest(subscription)
+  }
+
+  private deliverPendingLatest(subscription: SubscriptionRecord) {
+    const pending = Array.from(subscription.pendingLatest.values())
+    subscription.pendingLatest.clear()
+    pending.forEach(message => subscription.listener(message))
   }
 
   private disposeSubscription(key: string) {
@@ -160,6 +212,7 @@ export class MessagePipeline {
     if (subscription.frameId !== null) {
       cancelAnimationFrame(subscription.frameId)
     }
+    subscription.pendingLatest.clear()
     this.subscriptions.delete(key)
   }
 
