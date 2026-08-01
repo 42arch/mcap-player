@@ -1,5 +1,4 @@
 import type { PanelComponentProps, RawMessagePanelConfig } from '@/panels/core/types'
-import { Radio } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { MessageViewer } from '@/components/common/message-viewer'
 import {
@@ -131,49 +130,45 @@ export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMess
   const channels = fileSummary?.channels || []
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 bg-background p-3">
-      <div className="mcap-panel-card flex-1 flex flex-col border border-border bg-card rounded-lg overflow-hidden shadow-xs">
-        <PanelContentHeader
-          icon={Radio}
-          title="Raw messages"
-          actions={fileSummary && channels.length > 0 && (
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="mcap-panel-content-header__label">Topic</span>
-              <Select
-                value={activeTopic || ''}
-                onValueChange={(val) => {
-                  updateConfig({ topic: val || null })
-                }}
-              >
-                <SelectTrigger size="sm" className="mcap-panel-topic-select w-48 max-w-full bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
-                  <SelectValue placeholder="Select topic..." />
-                </SelectTrigger>
-                <SelectContent position="popper" className="bg-popover text-popover-foreground">
-                  {channels.map(ch => (
-                    <SelectItem key={ch.id} value={ch.topic} className="font-mono text-[10px] py-1 h-6 min-h-0">
-                      {ch.topic}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        />
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-card overflow-hidden">
+      <PanelContentHeader
+        actions={fileSummary && channels.length > 0 && (
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="mcap-panel-content-header__label">Topic</span>
+            <Select
+              value={activeTopic || ''}
+              onValueChange={(val) => {
+                updateConfig({ topic: val || null })
+              }}
+            >
+              <SelectTrigger size="sm" className="mcap-panel-topic-select w-48 max-w-full bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
+                <SelectValue placeholder="Select topic..." />
+              </SelectTrigger>
+              <SelectContent position="popper" className="bg-popover text-popover-foreground">
+                {channels.map(ch => (
+                  <SelectItem key={ch.id} value={ch.topic} className="font-mono text-[10px] py-1 h-6 min-h-0">
+                    {ch.topic}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      />
 
-        {/* Content Body */}
-        {!activeTopic
-          ? (
-              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-card">
-                <p className="text-xs font-semibold">No Topic Selected</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
-                  Please select an active topic from the dropdown selector in the header to inspect its payload details.
-                </p>
-              </div>
-            )
-          : (
-              <RawMessageViewer panelId={panelId} topic={activeTopic} refreshRateHz={config.refreshRateHz} binaryFormat={config.binaryFormat} />
-            )}
-      </div>
+      {/* Content Body */}
+      {!activeTopic
+        ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-card">
+              <p className="text-xs font-semibold">No Topic Selected</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
+                Please select an active topic from the dropdown selector in the header to inspect its payload details.
+              </p>
+            </div>
+          )
+        : (
+            <RawMessageViewer panelId={panelId} topic={activeTopic} refreshRateHz={config.refreshRateHz} binaryFormat={config.binaryFormat} />
+          )}
     </div>
   )
 }

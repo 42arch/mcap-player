@@ -1,5 +1,4 @@
 import type { ImagePanelConfig, PanelComponentProps } from '@/panels/core/types'
-import { Image as ImageIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import {
   Select,
@@ -45,7 +44,7 @@ function ImageViewer({ panelId, topic, imageFit, brightness }: ImageViewerProps)
     let isScheduled = false
 
     const initVideoDecoder = () => {
-      if (typeof window === 'undefined' || !('VideoDecoder' in window)) {
+      if (!('VideoDecoder' in window)) {
         console.warn('WebCodecs VideoDecoder is not supported in this browser environment.')
         return null
       }
@@ -324,58 +323,54 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
   })
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 bg-background p-3">
-      <div className="mcap-panel-card flex-1 flex flex-col border border-border bg-card rounded-lg overflow-hidden shadow-xs">
-        <PanelContentHeader
-          icon={ImageIcon}
-          title="Camera image"
-          actions={fileSummary && imageChannels.length > 0 && (
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="mcap-panel-content-header__label">Topic</span>
-              <Select
-                value={activeTopic || ''}
-                onValueChange={(val) => {
-                  updateConfig({ topic: val || null })
-                }}
-              >
-                <SelectTrigger size="sm" className="mcap-panel-topic-select w-48 max-w-full bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
-                  <SelectValue placeholder="Select image topic..." />
-                </SelectTrigger>
-                <SelectContent position="popper" className="bg-popover text-popover-foreground">
-                  {imageChannels.map(ch => (
-                    <SelectItem key={ch.id} value={ch.topic} className="font-mono text-[10px] py-1 h-6 min-h-0">
-                      {ch.topic}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        />
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-card overflow-hidden">
+      <PanelContentHeader
+        actions={fileSummary && imageChannels.length > 0 && (
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="mcap-panel-content-header__label">Topic</span>
+            <Select
+              value={activeTopic || ''}
+              onValueChange={(val) => {
+                updateConfig({ topic: val || null })
+              }}
+            >
+              <SelectTrigger size="sm" className="mcap-panel-topic-select w-48 max-w-full bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
+                <SelectValue placeholder="Select image topic..." />
+              </SelectTrigger>
+              <SelectContent position="popper" className="bg-popover text-popover-foreground">
+                {imageChannels.map(ch => (
+                  <SelectItem key={ch.id} value={ch.topic} className="font-mono text-[10px] py-1 h-6 min-h-0">
+                    {ch.topic}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+      />
 
-        {/* Content Body */}
-        {imageChannels.length === 0
-          ? (
-              <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
-                <p className="text-xs font-semibold">No Image Channels Available</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                  No topics with schema type matching sensor_msgs/Image or sensor_msgs/CompressedImage were found in this file.
-                </p>
-              </div>
-            )
-          : !activeTopic
-              ? (
-                  <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
-                    <p className="text-xs font-semibold">No Topic Selected</p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                      Please select an active camera topic from the dropdown selector in the header to view the frame.
-                    </p>
-                  </div>
-                )
-              : (
-                  <ImageViewer panelId={panelId} topic={activeTopic} imageFit={config.imageFit} brightness={config.brightness} />
-                )}
-      </div>
+      {/* Content Body */}
+      {imageChannels.length === 0
+        ? (
+            <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
+              <p className="text-xs font-semibold">No Image Channels Available</p>
+              <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
+                No topics with schema type matching sensor_msgs/Image or sensor_msgs/CompressedImage were found in this file.
+              </p>
+            </div>
+          )
+        : !activeTopic
+            ? (
+                <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
+                  <p className="text-xs font-semibold">No Topic Selected</p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
+                    Please select an active camera topic from the dropdown selector in the header to view the frame.
+                  </p>
+                </div>
+              )
+            : (
+                <ImageViewer panelId={panelId} topic={activeTopic} imageFit={config.imageFit} brightness={config.brightness} />
+              )}
     </div>
   )
 }

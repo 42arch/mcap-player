@@ -1,5 +1,3 @@
-'use client'
-
 import type { IDockviewPanelHeaderProps } from 'dockview-react'
 import { useEffect, useState } from 'react'
 import { getPanelDefinition } from '@/panels/core/panel-registry'

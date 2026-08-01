@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/resizable'
 import MainContent from './main-content'
 import MenuBar from './menu-bar'
-import PlayBack from './play-back'
+import Playback from './playback'
 import SideBar from './side-bar'
 
 export default function AppShell() {
@@ -55,7 +55,7 @@ export default function AppShell() {
 
           {/* Bottom Panel (PlayBack Controller) */}
           <ResizablePanel defaultSize="10%" minSize="10%" maxSize="10%" className="bg-card shrink-0">
-            <PlayBack />
+            <Playback />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>

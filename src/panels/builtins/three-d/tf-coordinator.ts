@@ -45,12 +45,14 @@ function extractTransforms(payload: any): TransformRecord[] {
  */
 export class FrameTransformCoordinator {
   private unsubscribers: (() => void)[] = []
+  private listeners = new Set<() => void>()
   private transformsByChild = new Map<string, THREE.Matrix4>()
   private parentByChild = new Map<string, string>()
   private childrenByParent = new Map<string, Set<string>>()
   private targets = new Map<THREE.Object3D, string>()
+  private fallbackTransforms = new Map<THREE.Object3D, THREE.Matrix4>()
   private legacyLidarMatchers = new Map<THREE.Object3D, (frameId: string) => boolean>()
-  private rootFrameId = 'base_link'
+  private configuredFixedFrameId: string | null = null
   private receivedSinceSeek = true
 
   constructor(private readonly panelId = 'standalone') {}
@@ -80,23 +82,40 @@ export class FrameTransformCoordinator {
   disconnect() {
     this.disconnectSubscriptions()
     this.clearTransformState()
-    this.targets.clear()
-    this.legacyLidarMatchers.clear()
   }
 
-  setRootFrame(frameId: string) {
-    const normalized = normalizeFrameId(frameId)
-    if (!normalized || normalized === this.rootFrameId) {
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  getFixedFrameSnapshot = (): string => this.getResolvedFixedFrame() || ''
+
+  /** Selects an explicit fixed frame, or derives one from the TF graph in auto mode. */
+  setFixedFrame(frameId: string) {
+    const normalized = frameId.trim().toLowerCase() === 'auto'
+      ? null
+      : normalizeFrameId(frameId)
+    if (normalized === this.configuredFixedFrameId) {
       return
     }
-    this.rootFrameId = normalized
+    const previousFixedFrame = this.getResolvedFixedFrame()
+    this.configuredFixedFrameId = normalized
     this.updateTargets()
+    this.notifyIfFixedFrameChanged(previousFixedFrame)
   }
 
-  registerFrameTarget(object: THREE.Object3D, frameId: string): () => void {
+  registerFrameTarget(object: THREE.Object3D, frameId: string, preserveCurrentTransform = false): () => void {
+    if (preserveCurrentTransform) {
+      object.updateMatrix()
+      this.fallbackTransforms.set(object, object.matrix.clone())
+    }
     this.targets.set(object, normalizeFrameId(frameId))
     this.applyTransform(object)
-    return () => this.targets.delete(object)
+    return () => {
+      this.targets.delete(object)
+      this.fallbackTransforms.delete(object)
+    }
   }
 
   setFrameTarget(object: THREE.Object3D, frameId: string) {
@@ -118,13 +137,15 @@ export class FrameTransformCoordinator {
     this.legacyLidarMatchers.set(object, matches)
     return () => {
       this.targets.delete(object)
+      this.fallbackTransforms.delete(object)
       this.legacyLidarMatchers.delete(object)
     }
   }
 
   consume(payload: any, replaceState = false) {
+    const previousFixedFrame = this.getResolvedFixedFrame()
     if (replaceState) {
-      this.clearTransformState()
+      this.clearTransformState(false)
     }
     let hasChanges = false
     for (const transform of extractTransforms(payload)) {
@@ -142,7 +163,11 @@ export class FrameTransformCoordinator {
       )
       const previousParent = this.parentByChild.get(child)
       if (previousParent && previousParent !== parent) {
-        this.childrenByParent.get(previousParent)?.delete(child)
+        const previousChildren = this.childrenByParent.get(previousParent)
+        previousChildren?.delete(child)
+        if (previousChildren?.size === 0) {
+          this.childrenByParent.delete(previousParent)
+        }
       }
       this.transformsByChild.set(child, matrix)
       this.parentByChild.set(child, parent)
@@ -162,17 +187,19 @@ export class FrameTransformCoordinator {
     if (hasChanges) {
       this.updateTargets()
     }
+    this.notifyIfFixedFrameChanged(previousFixedFrame)
   }
 
-  private clearTransformState() {
+  private clearTransformState(notify = true) {
+    const previousFixedFrame = this.getResolvedFixedFrame()
     this.transformsByChild.clear()
     this.parentByChild.clear()
     this.childrenByParent.clear()
     for (const object of this.targets.keys()) {
-      object.position.set(0, 0, 0)
-      object.quaternion.identity()
-      object.scale.set(1, 1, 1)
-      object.updateMatrix()
+      this.applyFallbackTransform(object)
+    }
+    if (notify) {
+      this.notifyIfFixedFrameChanged(previousFixedFrame)
     }
   }
 
@@ -189,31 +216,71 @@ export class FrameTransformCoordinator {
     }
   }
 
+  private getResolvedFixedFrame(): string | null {
+    if (this.configuredFixedFrameId) {
+      return this.configuredFixedFrameId
+    }
+
+    // A valid TF tree root is a parent frame that never appears as a child.
+    for (const parentFrame of this.childrenByParent.keys()) {
+      if (!this.parentByChild.has(parentFrame)) {
+        return parentFrame
+      }
+    }
+    return null
+  }
+
+  private notifyIfFixedFrameChanged(previousFixedFrame: string | null) {
+    if (previousFixedFrame !== this.getResolvedFixedFrame()) {
+      this.listeners.forEach(listener => listener())
+    }
+  }
+
   private applyTransform(object: THREE.Object3D) {
     const frameId = this.targets.get(object)
-    if (!frameId || frameId === this.rootFrameId) {
+    const fixedFrameId = this.getResolvedFixedFrame()
+    if (!frameId || frameId === fixedFrameId) {
       object.position.set(0, 0, 0)
       object.quaternion.identity()
       object.updateMatrix()
       return
     }
 
-    const matrix = this.lookupTransform(frameId)
+    if (!fixedFrameId) {
+      this.applyFallbackTransform(object)
+      return
+    }
+
+    const matrix = this.lookupTransform(frameId, fixedFrameId)
     if (!matrix) {
+      this.applyFallbackTransform(object)
       return
     }
     matrix.decompose(object.position, object.quaternion, object.scale)
     object.updateMatrix()
   }
 
-  /** Returns T(root <- frame), traversing the latest known tree in either direction. */
-  private lookupTransform(frameId: string): THREE.Matrix4 | null {
+  private applyFallbackTransform(object: THREE.Object3D) {
+    const fallback = this.fallbackTransforms.get(object)
+    if (fallback) {
+      fallback.decompose(object.position, object.quaternion, object.scale)
+    }
+    else {
+      object.position.set(0, 0, 0)
+      object.quaternion.identity()
+      object.scale.set(1, 1, 1)
+    }
+    object.updateMatrix()
+  }
+
+  /** Returns T(fixed <- frame), traversing the latest known tree in either direction. */
+  private lookupTransform(frameId: string, fixedFrameId: string): THREE.Matrix4 | null {
     const visited = new Set<string>()
     const pending = [{ frameId, matrix: new THREE.Matrix4().identity() }]
 
     while (pending.length > 0) {
       const current = pending.shift()!
-      if (current.frameId === this.rootFrameId) {
+      if (current.frameId === fixedFrameId) {
         return current.matrix
       }
       if (visited.has(current.frameId)) {

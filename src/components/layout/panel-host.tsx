@@ -1,5 +1,3 @@
-'use client'
-
 import type { IDockviewPanelProps } from 'dockview-react'
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { Component, Suspense } from 'react'

@@ -16,6 +16,7 @@ interface PanelState {
   setActivePanel: (panelId: PanelId | null) => void
   setSelectedPanel: (panelId: PanelId | null) => void
   setSidebarTab: (tab: 'topics' | 'settings') => void
+  resetPanels: () => void
 }
 
 export const usePanelStore = create<PanelState>((set, get) => ({
@@ -88,4 +89,12 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   setActivePanel: panelId => set({ activePanelId: panelId }),
   setSelectedPanel: panelId => set({ selectedPanelId: panelId }),
   setSidebarTab: sidebarTab => set({ sidebarTab }),
+  resetPanels: () =>
+    set({
+      panelsById: {},
+      panelOrder: [],
+      activePanelId: null,
+      selectedPanelId: null,
+      sidebarTab: 'topics',
+    }),
 }))

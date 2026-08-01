@@ -60,7 +60,17 @@
   --color-text-secondary: var(--text-secondary);
 }
 
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 :root {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-geist-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-heading: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.141 0.005 285.823);
   --popover: oklch(1 0 0);
@@ -253,12 +263,37 @@
   outline-offset: -1px;
 }
 
-.mcap-dockview .dv-groupview > .dv-content-container {
-  background: var(--background);
+.mcap-dockview {
+  /* border: 1px solid var(--border); */
 }
 
-.mcap-dockview .dv-sash:not(.dv-disabled):hover,
-.mcap-dockview .dv-sash:not(.dv-disabled):active {
+.mcap-dockview [class*="sash"] {
+  background-color: transparent !important;
+}
+
+.mcap-dockview [class*="sash"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  margin: auto;
+  width: 1px;
+  height: 100%;
+  background-color: var(--border);
+  pointer-events: none;
+  transition: background-color 150ms ease;
+}
+
+.mcap-dockview [class*="sash"][class*="horizontal"]::before,
+.mcap-dockview [class*="sash"].horizontal::before {
+  width: 100%;
+  height: 1px;
+}
+
+.mcap-dockview [class*="sash"]:hover::before,
+.mcap-dockview [class*="sash"]:active::before {
   background-color: var(--ring);
 }
 
@@ -317,58 +352,24 @@
 
 .mcap-panel-content-header {
   display: flex;
-  min-height: 42px;
+  min-height: 28px;
   flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 7px 10px;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 3px 8px;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in oklch, var(--card) 90%, var(--muted));
+  background: color-mix(in oklch, var(--card) 95%, var(--muted));
   user-select: none;
-}
-
-.mcap-panel-content-header__identity {
-  display: flex;
-  min-width: 0;
-  flex: none;
-  align-items: center;
-  gap: 7px;
-}
-
-.mcap-panel-content-header__icon {
-  display: flex;
-  width: 24px;
-  height: 24px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  border-radius: 5px;
-  background: var(--muted);
-  color: var(--muted-foreground);
-}
-
-.mcap-panel-content-header__icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.mcap-panel-content-header__title {
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .mcap-panel-content-header__actions {
   display: flex;
   min-width: 0;
-  max-width: 70%;
-  flex: 0 1 auto;
+  width: 100%;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: flex-end;
   overflow-x: auto;
   scrollbar-width: none;
 }

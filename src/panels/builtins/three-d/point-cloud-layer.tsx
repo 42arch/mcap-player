@@ -1,40 +1,31 @@
-import type { FrameTransformCoordinator } from './tf-coordinator'
-import type { ThreeDPanelConfig } from '@/panels/core/types'
+import type { SceneLayerProps } from './scene-renderer-registry'
+import type { PreparedPointCloud } from '@/core/parsers/point-cloud-parser'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
-import { parsePointCloud } from '@/core/parsers/point-cloud-parser'
-import { usePanelConfigForId } from '@/panels/core/panel-context'
+import { preparePointCloud, renderPreparedPointCloud } from '@/core/parsers/point-cloud-parser'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
+import { readPointCloudSettings } from './point-cloud-config'
+import { adaptSceneMessage } from './scene-message-adapter-registry'
+import { getSceneLayerFrameOverride } from './scene-renderer-registry'
 
-interface PointCloudLayerProps {
-  panelId: string
-  topic: string
-  onPointCountUpdate: (topic: string, count: number) => void
-  tfCoordinator: FrameTransformCoordinator
-}
-
-export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordinator }: PointCloudLayerProps) {
+export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordinator }: SceneLayerProps) {
+  const topic = channel.topic
   const pointsRef = useRef<THREE.Points>(null)
   const geometryRef = useRef<THREE.BufferGeometry>(null)
-  const lastPayloadRef = useRef<any>(null)
+  const lastPointCloudRef = useRef<PreparedPointCloud | null>(null)
   const unregisterFrameRef = useRef<(() => void) | null>(null)
   const receivedSinceSeekRef = useRef(true)
 
-  const [threeDSettings] = usePanelConfigForId<ThreeDPanelConfig>(panelId)
-  const colorMode = threeDSettings.colorMode
-  const solidColor = threeDSettings.solidColor
-  const maxPoints = threeDSettings.maxPoints
-  const pointSize = threeDSettings.pointSize
+  const { colorMode, maxPoints, pointSize, solidColor } = readPointCloudSettings(settings)
+  const frameOverride = getSceneLayerFrameOverride(settings)
 
   // Stable refs: avoid re-subscribing when settings or callbacks change
   const settingsRef = useRef({ colorMode, solidColor, maxPoints })
   settingsRef.current = { colorMode, solidColor, maxPoints }
 
-  const onPointCountUpdateRef = useRef(onPointCountUpdate)
-  onPointCountUpdateRef.current = onPointCountUpdate
-
   const posBufferRef = useRef<Float32Array>(new Float32Array(maxPoints * 3))
   const colBufferRef = useRef<Float32Array>(new Float32Array(maxPoints * 3))
+  const boundsCenterRef = useRef(new THREE.Vector3())
 
   useEffect(() => {
     if (posBufferRef.current.length < maxPoints * 3) {
@@ -55,11 +46,8 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
     }
   }, [maxPoints])
 
-  const lastReportedCountRef = useRef<number>(-1)
-  const lastReportTimeRef = useRef<number>(0)
-
-  const renderPayload = (payload: any) => {
-    if (!payload || !geometryRef.current) {
+  const renderPointCloud = (pointCloud: PreparedPointCloud) => {
+    if (!geometryRef.current) {
       return
     }
 
@@ -71,7 +59,7 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
     }
 
     const { colorMode: cm, solidColor: sc, maxPoints: mp } = settingsRef.current
-    const parsed = parsePointCloud(payload, {
+    const parsed = renderPreparedPointCloud(pointCloud, {
       colorMode: cm,
       solidColor: sc,
       maxPoints: mp,
@@ -88,26 +76,20 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
     colAttr.needsUpdate = true
     geometry.setDrawRange(0, parsed.pointCount)
 
-    const now = performance.now()
-    if (
-      Math.abs(parsed.pointCount - lastReportedCountRef.current) > 500
-      || now - lastReportTimeRef.current > 1000
-    ) {
-      lastReportedCountRef.current = parsed.pointCount
-      lastReportTimeRef.current = now
-      onPointCountUpdateRef.current(topic, parsed.pointCount)
-    }
+    const min = new THREE.Vector3(parsed.minX, parsed.minY, parsed.minZ)
+    const max = new THREE.Vector3(parsed.maxX, parsed.maxY, parsed.maxZ)
+    const center = boundsCenterRef.current.copy(min).add(max).multiplyScalar(0.5)
+    geometry.boundingSphere = new THREE.Sphere(center, center.distanceTo(max))
   }
 
   useEffect(() => {
-    if (lastPayloadRef.current) {
-      renderPayload(lastPayloadRef.current)
+    if (lastPointCloudRef.current) {
+      renderPointCloud(lastPointCloudRef.current)
     }
   }, [colorMode, solidColor, maxPoints])
 
   useEffect(() => {
     if (!topic) {
-      onPointCountUpdateRef.current(topic, 0)
       return
     }
 
@@ -116,24 +98,41 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
       return
     }
     const inferredFrameId = topic.split('/').filter(Boolean).at(-1) || ''
-    unregisterFrameRef.current = tfCoordinator.registerFrameTarget(points, inferredFrameId)
+    unregisterFrameRef.current = tfCoordinator.registerFrameTarget(points, frameOverride || inferredFrameId)
+    const canPrepareInWorker = adapter === null || adapter.id === 'foxglove-ros-point-cloud'
 
     const unsub = globalMessagePipeline.subscribe({
       panelId,
       subscriptionId: `point-cloud:${topic}`,
-      topics: [{ topic, mode: 'latest' }],
+      topics: [{
+        topic,
+        mode: 'latest',
+        processor: canPrepareInWorker
+          ? { type: 'point-cloud', maxPoints }
+          : undefined,
+      }],
     }, (msg: any) => {
       if (!msg || !msg.payload) {
         return
       }
 
-      receivedSinceSeekRef.current = true
-      lastPayloadRef.current = msg.payload
-      const frameId = msg.payload.frame_id || msg.payload.header?.frame_id
-      if (typeof frameId === 'string' && frameId) {
-        tfCoordinator.setFrameTarget(points, frameId)
+      try {
+        const adapted = adaptSceneMessage(adapter, msg.payload, channel)
+        const pointCloud = preparePointCloud(adapted.payload, maxPoints)
+        if (!pointCloud) {
+          return
+        }
+        receivedSinceSeekRef.current = true
+        lastPointCloudRef.current = pointCloud
+        const frameId = frameOverride || adapted.frameId || pointCloud.frameId
+        if (frameId) {
+          tfCoordinator.setFrameTarget(points, frameId)
+        }
+        renderPointCloud(pointCloud)
       }
-      renderPayload(msg.payload)
+      catch (error) {
+        console.warn(`Failed to adapt Point Cloud topic "${topic}":`, error)
+      }
     })
 
     // The current point cloud intentionally remains visible until backfill replaces it.
@@ -145,8 +144,7 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
         return
       }
       geometryRef.current?.setDrawRange(0, 0)
-      lastPayloadRef.current = null
-      onPointCountUpdateRef.current(topic, 0)
+      lastPointCloudRef.current = null
     })
     return () => {
       unregisterFrameRef.current?.()
@@ -154,9 +152,8 @@ export function PointCloudLayer({ panelId, topic, onPointCountUpdate, tfCoordina
       unsub()
       unsubSeek()
       unsubSeekComplete()
-      onPointCountUpdateRef.current(topic, 0)
     }
-  }, [panelId, topic, tfCoordinator])
+  }, [adapter, channel, frameOverride, maxPoints, panelId, topic, tfCoordinator])
 
   return (
     <points ref={pointsRef}>

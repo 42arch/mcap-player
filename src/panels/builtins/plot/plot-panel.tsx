@@ -1,8 +1,10 @@
+import type UPlot from 'uplot'
+import type { UPlotChartHandle, UPlotChartOptions } from '@/components/common/uplot-chart'
 import type { PanelComponentProps, PlotPanelConfig } from '@/panels/core/types'
-import { Loader2, Radio } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useTheme } from 'next-themes'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import UPlot from 'uplot'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import UPlotChart from '@/components/common/uplot-chart'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
 import { usePanelMessages } from '@/panels/runtime/use-panel-messages'
@@ -56,15 +58,23 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
   const elapsedNs = usePlayerStore(state => state.elapsedNs)
   const { resolvedTheme } = useTheme()
 
-  const containerRef = useRef<HTMLDivElement>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
-  const uplotRef = useRef<UPlot | null>(null)
-  const dataRef = useRef<UPlot.AlignedData>([[], []])
+  const chartRef = useRef<UPlotChartHandle>(null)
+  const defaultYRangeRef = useRef<{ min: number, max: number } | null>(null)
 
   const [loadingData, setLoadingData] = useState(false)
 
   // Filter series that are fully configured with topic and path
-  const activeSeries = plotSeries.filter(s => s.topic && s.path)
+  const activeSeries = useMemo(
+    () => plotSeries.filter(s => s.topic && s.path),
+    [plotSeries],
+  )
+
+  const emptyChartData = useMemo(
+    () => [[], ...activeSeries.map(() => [])] as UPlot.AlignedData,
+    [activeSeries],
+  )
+  const [chartData, setChartData] = useState<UPlot.AlignedData>(emptyChartData)
 
   const activeSeriesSerialized = JSON.stringify(
     activeSeries.map(s => ({
@@ -87,27 +97,24 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
   })
 
   // Keep a reference of the current play time for the uPlot plugin to draw the timeline marker
-  const currentPlayTime = useRef<number>(0)
-  currentPlayTime.current = Number(elapsedNs) / 1e9
+  const currentPlayTimeRef = useRef<number>(0)
+  currentPlayTimeRef.current = Number(elapsedNs) / 1e9
 
   // Redraw the chart when elapsedNs changes to reposition the time marker line
   useEffect(() => {
-    if (uplotRef.current) {
-      uplotRef.current.redraw()
-    }
+    chartRef.current?.redraw()
   }, [elapsedNs])
 
   // Fetch full data for all active series in parallel and merge them
   useEffect(() => {
     if (activeSeries.length === 0 || !fileSummary) {
-      dataRef.current = [[], []]
-      if (uplotRef.current) {
-        uplotRef.current.setData([[], []])
-      }
+      setChartData(emptyChartData)
+      defaultYRangeRef.current = null
       return
     }
 
     let isCurrent = true
+    setChartData(emptyChartData)
     setLoadingData(true)
 
     Promise.all(
@@ -124,11 +131,7 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
       }
 
       const merged = mergeTimeSeries(results)
-      dataRef.current = merged
-
-      if (uplotRef.current) {
-        uplotRef.current.setData(merged)
-      }
+      setChartData(merged)
       setLoadingData(false)
     }).catch((err) => {
       console.error('Error fetching series data:', err)
@@ -140,16 +143,12 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
     return () => {
       isCurrent = false
     }
-  }, [activeSeriesSerialized, fileSummary])
+  }, [activeSeries, activeSeriesSerialized, emptyChartData, fileSummary])
 
-  // Effect to construct/destruct uPlot instance
-  useEffect(() => {
-    if (!containerRef.current || !fileSummary) {
-      return
+  const chartOptions = useMemo<UPlotChartOptions | null>(() => {
+    if (!fileSummary) {
+      return null
     }
-
-    const width = containerRef.current.clientWidth || 300
-    const height = containerRef.current.clientHeight || 200
 
     const isDark = resolvedTheme === 'dark'
     const textCol = isDark ? '#a1a1aa' : '#4b5563'
@@ -159,7 +158,7 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
     const timeMarkerPlugin = {
       hooks: {
         draw: (u: UPlot) => {
-          const xVal = currentPlayTime.current
+          const xVal = currentPlayTimeRef.current
           if (xVal === null || xVal === undefined) {
             return
           }
@@ -252,9 +251,7 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
       },
     }
 
-    const opts: UPlot.Options = {
-      width,
-      height,
+    return {
       cursor: {
         drag: {
           x: false,
@@ -299,204 +296,112 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
       ],
       plugins: [timeMarkerPlugin, tooltipPlugin],
     }
+  }, [activeSeries, fileSummary, resolvedTheme])
 
-    const validDataLen = activeSeries.length + 1
-    const initialData: UPlot.AlignedData = (dataRef.current && dataRef.current.length === validDataLen)
-      ? dataRef.current
-      : [[], ...activeSeries.map(() => [])] as UPlot.AlignedData
+  const handleChartData = useCallback((uplot: UPlot) => {
+    const yScale = uplot.scales.y
+    if (typeof yScale.min === 'number' && typeof yScale.max === 'number') {
+      defaultYRangeRef.current = { min: yScale.min, max: yScale.max }
+    }
+  }, [])
 
-    const uplot = new UPlot(opts, initialData, containerRef.current)
-    uplotRef.current = uplot
-    uplot.over.style.cursor = 'grab'
-
-    // Mouse drag-to-pan & click-to-seek logic
-    let isDragging = false
-    let dragStartX = 0
-    let dragStartY = 0
-    let panInitialMin = 0
-    let panInitialMax = 0
-
-    const handleMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0) {
-        return
-      }
-      isDragging = true
-      dragStartX = e.clientX
-      dragStartY = e.clientY
-      panInitialMin = uplot.scales.x.min!
-      panInitialMax = uplot.scales.x.max!
-
-      uplot.over.style.cursor = 'grabbing'
-      document.body.style.cursor = 'grabbing'
+  const handleChartClick = useCallback((uplot: UPlot) => {
+    if (!fileSummary) {
+      return
     }
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) {
-        return
-      }
+    const { left } = uplot.cursor
+    if (left !== null && left !== undefined && left >= 0) {
+      const timeVal = uplot.posToVal(left, 'x')
+      const seekNs = fileSummary.startNs + BigInt(Math.round(timeVal * 1e9))
+      globalPlaybackController.seek(seekNs)
+    }
+  }, [fileSummary])
 
-      const dxPx = e.clientX - dragStartX
-      const plotWidth = uplot.over.clientWidth
-      if (plotWidth <= 0) {
-        return
-      }
-
-      const xRange = panInitialMax - panInitialMin
-      const valPerPx = xRange / plotWidth
-      const newMin = panInitialMin - dxPx * valPerPx
-      const newMax = panInitialMax - dxPx * valPerPx
-
-      uplot.setScale('x', { min: newMin, max: newMax })
+  const handleChartDoubleClick = useCallback((uplot: UPlot) => {
+    if (!fileSummary) {
+      return
     }
 
-    const handleMouseUp = (e: MouseEvent) => {
-      if (!isDragging) {
-        return
-      }
-      isDragging = false
-
-      uplot.over.style.cursor = 'grab'
-      document.body.style.cursor = ''
-
-      // Prevent seeking during double-clicks
-      if (e.detail > 1) {
-        return
-      }
-
-      // Seek playback if mouse move distance is minimal (single click gesture)
-      const dist = Math.sqrt((e.clientX - dragStartX) ** 2 + (e.clientY - dragStartY) ** 2)
-      if (dist <= 4) {
-        const { left } = uplot.cursor
-        if (left !== null && left !== undefined && left >= 0) {
-          const timeVal = uplot.posToVal(left, 'x')
-          const seekNs = fileSummary.startNs + BigInt(Math.round(timeVal * 1e9))
-          globalPlaybackController.seek(seekNs)
-        }
-      }
-    }
-
-    const handleDblClick = () => {
-      const durationSec = Number(fileSummary.durationNs) / 1e9
+    const durationSec = Number(fileSummary.durationNs) / 1e9
+    uplot.batch(() => {
       uplot.setScale('x', { min: 0, max: durationSec })
-    }
-
-    // Scroll wheel zoom centered at mouse pointer position
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault()
-
-      const { left } = uplot.cursor
-      const plotWidth = uplot.over.clientWidth
-      if (left === null || left === undefined || left < 0 || left > plotWidth) {
-        return
-      }
-
-      const mouseXVal = uplot.posToVal(left, 'x')
-      const xMin = uplot.scales.x.min!
-      const xMax = uplot.scales.x.max!
-      const xRange = xMax - xMin
-
-      const factor = e.deltaY < 0 ? 0.85 : 1.15
-      const newRange = xRange * factor
-
-      // Bound minimum zoom range to 100ms and maximum to 2x file duration
-      const durationSec = Number(fileSummary.durationNs) / 1e9
-      if (newRange < 0.1 || newRange > durationSec * 2) {
-        return
-      }
-
-      const pct = left / plotWidth
-      const newMin = mouseXVal - pct * newRange
-      const newMax = newMin + newRange
-
-      uplot.setScale('x', { min: newMin, max: newMax })
-    }
-
-    uplot.over.addEventListener('mousedown', handleMouseDown)
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
-    uplot.over.addEventListener('dblclick', handleDblClick)
-    uplot.over.addEventListener('wheel', handleWheel, { passive: false })
-
-    // Resize Observer
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry && uplotRef.current) {
-        const { width: rw, height: rh } = entry.contentRect
-        uplotRef.current.setSize({
-          width: Math.max(rw - 8, 100),
-          height: Math.max(rh - 8, 100),
-        })
+      if (defaultYRangeRef.current) {
+        uplot.setScale('y', defaultYRangeRef.current)
       }
     })
-    observer.observe(containerRef.current)
+  }, [fileSummary])
 
-    return () => {
-      observer.disconnect()
-      if (uplot.over) {
-        uplot.over.removeEventListener('mousedown', handleMouseDown)
-        uplot.over.removeEventListener('dblclick', handleDblClick)
-        uplot.over.removeEventListener('wheel', handleWheel)
-      }
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-      uplot.destroy()
-      uplotRef.current = null
+  const wheelZoom = useMemo(() => {
+    if (!fileSummary) {
+      return undefined
     }
-  }, [resolvedTheme, activeSeriesSerialized, fileSummary])
+    return {
+      maxRange: Number(fileSummary.durationNs) / 1e9 * 2,
+      minRange: 0.1,
+    }
+  }, [fileSummary])
 
   return (
-    <div className="flex-1 flex flex-col h-full min-h-0 bg-background p-3">
-      <div className="mcap-panel-card flex-1 flex flex-col border border-border bg-card rounded-lg overflow-hidden shadow-xs">
-        <PanelContentHeader
-          icon={Radio}
-          title="Time-series plot"
-          actions={activeSeries.length > 0 && (
-            <div className="flex items-center gap-1.5">
-              {activeSeries.map(s => (
-                <div key={s.id} className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-muted/50 px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></span>
-                  <span className="font-bold">{s.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        />
+    <div className="flex-1 flex flex-col h-full min-h-0 bg-card overflow-hidden">
+      <PanelContentHeader
+        actions={activeSeries.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            {activeSeries.map(s => (
+              <div key={s.id} className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-muted/50 px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></span>
+                <span className="font-bold">{s.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      />
 
-        {/* Chart Container Body */}
-        <div className="flex-1 min-h-0 relative p-4 flex items-center justify-center bg-background overflow-hidden">
-          {loadingData && (
-            <div className="absolute inset-0 bg-background/50 flex flex-col items-center justify-center z-10 text-muted-foreground select-none">
-              <Loader2 className="w-6 h-6 animate-spin text-primary mb-2" />
-              <p className="text-[10px] font-semibold">Extracting full datasets...</p>
-            </div>
-          )}
+      {/* Chart Container Body */}
+      <div className="flex-1 min-h-0 relative p-4 flex items-center justify-center bg-background overflow-hidden">
+        {loadingData && (
+          <div className="absolute inset-0 bg-background/50 flex flex-col items-center justify-center z-10 text-muted-foreground select-none">
+            <Loader2 className="w-6 h-6 animate-spin text-primary mb-2" />
+            <p className="text-[10px] font-semibold">Extracting full datasets...</p>
+          </div>
+        )}
 
-          {plotSeries.length === 0
+        {plotSeries.length === 0
+          ? (
+              <div className="text-center text-muted-foreground p-8">
+                <p className="text-xs font-semibold">No Series Configured</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
+                  Please add and configure a plot series in the left Settings tab to start visualization.
+                </p>
+              </div>
+            )
+          : activeSeries.length === 0
             ? (
                 <div className="text-center text-muted-foreground p-8">
-                  <p className="text-xs font-semibold">No Series Configured</p>
+                  <p className="text-xs font-semibold">Series Incomplete</p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                    Please add and configure a plot series in the left Settings tab to start visualization.
+                    Please specify both topic and value path for your configured series in the left Settings tab to render.
                   </p>
                 </div>
               )
-            : activeSeries.length === 0
-              ? (
-                  <div className="text-center text-muted-foreground p-8">
-                    <p className="text-xs font-semibold">Series Incomplete</p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                      Please specify both topic and value path for your configured series in the left Settings tab to render.
-                    </p>
-                  </div>
-                )
-              : (
-                  <div className="w-full h-full min-h-0 relative flex items-center justify-center">
-                    <div ref={containerRef} className="w-full h-full min-h-0 relative flex items-center justify-center" />
-                    <div ref={tooltipRef} className="absolute hidden pointer-events-none bg-popover/90 border border-border text-popover-foreground text-[10px] px-2 py-1.5 rounded-md shadow-md z-30 font-mono backdrop-blur-xs select-none min-w-32 leading-normal" />
-                  </div>
-                )}
-        </div>
+            : (
+                <div className="w-full h-full min-h-0 relative flex items-center justify-center">
+                  {chartOptions && (
+                    <UPlotChart
+                      ref={chartRef}
+                      className="w-full h-full min-h-0 relative flex items-center justify-center"
+                      data={chartData}
+                      onClick={handleChartClick}
+                      onData={handleChartData}
+                      onDoubleClick={handleChartDoubleClick}
+                      options={chartOptions}
+                      sizePadding={{ height: 8, width: 8 }}
+                      wheelZoom={wheelZoom}
+                    />
+                  )}
+                  <div ref={tooltipRef} className="absolute hidden pointer-events-none bg-popover/90 border border-border text-popover-foreground text-[10px] px-2 py-1.5 rounded-md shadow-md z-30 font-mono backdrop-blur-xs select-none min-w-32 leading-normal" />
+                </div>
+              )}
       </div>
     </div>
   )

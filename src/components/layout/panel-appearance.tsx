@@ -3,6 +3,7 @@ import {
   Box,
   Braces,
   ChartNoAxesCombined,
+  ChartNoAxesGantt,
   Image,
   LayoutDashboard,
   PanelsTopLeft,
@@ -34,6 +35,11 @@ const panelAppearances: Record<string, PanelAppearance> = {
     Icon: ChartNoAxesCombined,
     shortTitle: 'Plot',
     description: 'Chart numeric message fields',
+  },
+  'timeline': {
+    Icon: ChartNoAxesGantt,
+    shortTitle: 'Timeline',
+    description: 'Inspect message timing by topic',
   },
   '3d': {
     Icon: Box,

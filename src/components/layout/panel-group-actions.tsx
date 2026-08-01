@@ -1,5 +1,3 @@
-'use client'
-
 import type { IDockviewHeaderActionsProps } from 'dockview-react'
 import {
   ArrowDown,

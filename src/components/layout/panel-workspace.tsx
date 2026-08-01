@@ -1,5 +1,3 @@
-'use client'
-
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-react'
 import { DockviewReact, themeDark, themeLight } from 'dockview-react'
 import { useTheme } from 'next-themes'

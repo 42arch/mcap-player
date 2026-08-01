@@ -1,3 +1,5 @@
+import type { AssetLoadTracker } from './asset-load-tracker'
+import type { SceneLayerProps } from './scene-renderer-registry'
 import type { FrameTransformCoordinator } from './tf-coordinator'
 import type {
   ColorTuple,
@@ -11,15 +13,16 @@ import type {
   ParsedText,
   ParsedTriangleList,
 } from '@/core/parsers/scene-update-parser'
-import type { ThreeDPanelConfig } from '@/panels/core/types'
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { createEmptySceneUpdate, SceneUpdateState } from '@/core/parsers/scene-update-parser'
-import { usePanelConfigForId } from '@/panels/core/panel-context'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
+import { getAssetLabel } from './asset-load-tracker'
+import { adaptSceneMessage } from './scene-message-adapter-registry'
+import { getSceneLayerFrameOverride, isPreferredSceneFocusTopic } from './scene-renderer-registry'
 
 // Single global unit box geometry & edges geometry shared by all bounding box instances
 const unitBoxGeo = new THREE.BoxGeometry(1, 1, 1)
@@ -441,7 +444,7 @@ function cloneGltfScene(scene: THREE.Group): THREE.Group {
   return scene.clone(true)
 }
 
-function EgoVehicleModel({ model }: { model: ParsedModel }) {
+function EgoVehicleModel({ assetLoadTracker, model }: { assetLoadTracker: AssetLoadTracker, model: ParsedModel }) {
   const [gltfScene, setGltfScene] = useState<THREE.Group | null>(null)
 
   const url = model.url
@@ -460,6 +463,7 @@ function EgoVehicleModel({ model }: { model: ParsedModel }) {
       return
     }
 
+    const assetLoad = assetLoadTracker.begin(cacheKey, getAssetLabel(url || '', 'Embedded 3D model'))
     if (!loadingPromises.has(cacheKey)) {
       const promise = new Promise<THREE.Group>((resolve, reject) => {
         const loader = new GLTFLoader()
@@ -506,18 +510,21 @@ function EgoVehicleModel({ model }: { model: ParsedModel }) {
     loadingPromises
       .get(cacheKey)!
       .then((scene) => {
+        assetLoad.finish()
         if (isMounted) {
           setGltfScene(cloneGltfScene(scene))
         }
       })
       .catch((err) => {
+        assetLoad.finish()
         console.warn('Failed to load GLB vehicle model:', cacheKey, err)
       })
 
     return () => {
       isMounted = false
+      assetLoad.cancel()
     }
-  }, [url, hasData])
+  }, [assetLoadTracker, url, hasData])
 
   return (
     <group position={model.position} quaternion={model.orientation} scale={model.scale}>
@@ -564,7 +571,7 @@ function splitSceneByFrame(scene: ParsedSceneUpdate): Array<[string, ParsedScene
   return Array.from(groups)
 }
 
-function ScenePrimitives({ scene }: { scene: ParsedSceneUpdate }) {
+function ScenePrimitives({ assetLoadTracker, scene }: { assetLoadTracker: AssetLoadTracker, scene: ParsedSceneUpdate }) {
   const cubeBatches = useMemo(() => {
     const groups = new Map<string, { cubes: ParsedCube[], color: string, alpha: number }>()
     for (const cube of scene.cubes) {
@@ -612,30 +619,57 @@ function ScenePrimitives({ scene }: { scene: ParsedSceneUpdate }) {
       {scene.cylinders.map(cylinder => <CylinderPrimitiveView key={cylinder.id} cylinder={cylinder} />)}
       {scene.arrows.map(arrow => <ArrowPrimitiveView key={arrow.id} arrow={arrow} />)}
       {scene.texts.map(text => <TextPrimitiveView key={text.id} text={text} />)}
-      {scene.models.map(model => <EgoVehicleModel key={model.id} model={model} />)}
+      {scene.models.map(model => <EgoVehicleModel key={model.id} assetLoadTracker={assetLoadTracker} model={model} />)}
     </>
   )
 }
 
 function FrameSceneGroup({
+  assetLoadTracker,
+  focusRef,
   frameId,
+  isFocusTarget = false,
   scene,
   tfCoordinator,
 }: {
+  assetLoadTracker: AssetLoadTracker
+  focusRef?: SceneLayerProps['focusRef']
   frameId: string
+  isFocusTarget?: boolean
   scene: ParsedSceneUpdate
   tfCoordinator: FrameTransformCoordinator
 }) {
   const groupRef = useRef<THREE.Group>(null)
+  const hasRenderableContent = scene.models.length > 0
+    || scene.cubes.length > 0
+    || scene.lines.length > 0
+    || scene.triangles.length > 0
+    || scene.spheres.length > 0
+    || scene.cylinders.length > 0
+    || scene.arrows.length > 0
+    || scene.texts.length > 0
 
   useEffect(() => {
     const group = groupRef.current
     return group ? tfCoordinator.registerFrameTarget(group, frameId) : undefined
   }, [frameId, tfCoordinator])
 
+  useEffect(() => {
+    const group = groupRef.current
+    if (!group || !focusRef || !isFocusTarget || !hasRenderableContent) {
+      return
+    }
+    focusRef.current = group
+    return () => {
+      if (focusRef.current === group) {
+        focusRef.current = null
+      }
+    }
+  }, [focusRef, hasRenderableContent, isFocusTarget])
+
   return (
     <group ref={groupRef}>
-      <ScenePrimitives scene={scene} />
+      <ScenePrimitives assetLoadTracker={assetLoadTracker} scene={scene} />
     </group>
   )
 }
@@ -660,11 +694,27 @@ function getLogTimeNs(message: any): bigint {
   return 0n
 }
 
-export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: string, topic: string, tfCoordinator: FrameTransformCoordinator }) {
+export function SceneUpdateLayer({
+  adapter,
+  assetLoadTracker,
+  channel,
+  focusRef,
+  panelId,
+  settings,
+  tfCoordinator,
+}: SceneLayerProps) {
+  const topic = channel.topic
+  const isFocusTarget = isPreferredSceneFocusTopic(topic)
   const [scene, setScene] = useState<ParsedSceneUpdate>(createEmptySceneUpdate)
-  const [threeDSettings] = usePanelConfigForId<ThreeDPanelConfig>(panelId)
-  const labelFields = threeDSettings.labelFieldsByTopic[topic] || emptyLabelFields
+  const [adapterFrameId, setAdapterFrameId] = useState<string | null>(null)
+  const labelFields = useMemo(
+    () => Array.isArray(settings.labelFields)
+      ? settings.labelFields.filter((field): field is string => typeof field === 'string')
+      : emptyLabelFields,
+    [settings.labelFields],
+  )
   const pendingUpdatesRef = useRef<PendingSceneUpdate[]>([])
+  const frameOverride = getSceneLayerFrameOverride(settings)
   const sceneStateRef = useRef(new SceneUpdateState())
   const rafIdRef = useRef<number | null>(null)
   const receivedSinceSeekRef = useRef(true)
@@ -681,6 +731,7 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
     pendingUpdatesRef.current = []
     sceneStateRef.current.clear()
     setScene(createEmptySceneUpdate())
+    setAdapterFrameId(null)
 
     const scheduleSceneUpdate = () => {
       if (rafIdRef.current !== null) {
@@ -712,13 +763,22 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
       if (!msg || !msg.payload) {
         return
       }
-      receivedSinceSeekRef.current = true
-      pendingUpdatesRef.current.push({
-        payload: msg.payload,
-        logTimeNs: getLogTimeNs(msg),
-        replaceState: msg.sceneSnapshot === true,
-      })
-      scheduleSceneUpdate()
+      try {
+        const adapted = adaptSceneMessage(adapter, msg.payload, channel)
+        receivedSinceSeekRef.current = true
+        if (adapted.frameId) {
+          setAdapterFrameId(adapted.frameId)
+        }
+        pendingUpdatesRef.current.push({
+          payload: adapted.payload,
+          logTimeNs: getLogTimeNs(msg),
+          replaceState: msg.sceneSnapshot === true,
+        })
+        scheduleSceneUpdate()
+      }
+      catch (error) {
+        console.warn(`Failed to adapt Scene Update topic "${topic}":`, error)
+      }
     })
 
     const unsubSeek = globalMessagePipeline.subscribeSeek(panelId, () => {
@@ -734,6 +794,7 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
     const unsubSeekComplete = globalMessagePipeline.subscribeSeekComplete(panelId, () => {
       if (!receivedSinceSeekRef.current) {
         setScene(createEmptySceneUpdate())
+        setAdapterFrameId(null)
       }
     })
 
@@ -746,7 +807,7 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
       unsubSeek()
       unsubSeekComplete()
     }
-  }, [panelId, topic, tfCoordinator])
+  }, [adapter, channel, panelId, topic])
 
   useEffect(() => {
     setScene(sceneStateRef.current.snapshot({ labelFields }))
@@ -757,7 +818,10 @@ export function SceneUpdateLayer({ panelId, topic, tfCoordinator }: { panelId: s
       {sceneByFrame.map(([frameId, frameScene]) => (
         <FrameSceneGroup
           key={frameId}
-          frameId={frameId}
+          assetLoadTracker={assetLoadTracker}
+          focusRef={focusRef}
+          frameId={frameOverride || adapterFrameId || frameId}
+          isFocusTarget={isFocusTarget}
           scene={frameScene}
           tfCoordinator={tfCoordinator}
         />

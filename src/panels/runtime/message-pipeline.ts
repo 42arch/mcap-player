@@ -1,3 +1,5 @@
+import type { MessageProcessor, MessageProcessorByTopic } from '@/core/message-processing'
+
 export type DeliveryMode = 'all' | 'latest'
 
 export interface PlaybackMessage {
@@ -15,6 +17,8 @@ export interface PlaybackMessage {
 export interface TopicSubscription {
   topic: string
   mode: DeliveryMode
+  processor?: MessageProcessor
+  retainOnSeek?: (timeNs: bigint) => boolean
 }
 
 export interface PanelSubscriptionOptions {
@@ -32,6 +36,7 @@ interface SubscriptionRecord extends PanelSubscriptionOptions {
 export interface QueryPlan {
   topics: string[]
   modeByTopic: Record<string, DeliveryMode>
+  processorsByTopic?: MessageProcessorByTopic
 }
 
 export class MessagePipeline {
@@ -143,15 +148,44 @@ export class MessagePipeline {
   }
 
   getQueryPlan(): QueryPlan {
+    return this.buildQueryPlan()
+  }
+
+  getSeekQueryPlan(timeNs: bigint): QueryPlan {
+    return this.buildQueryPlan(timeNs)
+  }
+
+  private buildQueryPlan(seekTimeNs?: bigint): QueryPlan {
     const modeByTopic: Record<string, DeliveryMode> = {}
+    const processorsByTopic: MessageProcessorByTopic = {}
+    const processorBlockedTopics = new Set<string>()
     for (const subscription of this.subscriptions.values()) {
       for (const topic of subscription.topics) {
+        if (seekTimeNs !== undefined && topic.retainOnSeek?.(seekTimeNs)) {
+          continue
+        }
         if (topic.mode === 'all' || modeByTopic[topic.topic] === undefined) {
           modeByTopic[topic.topic] = topic.mode
         }
+        if (!topic.processor) {
+          processorBlockedTopics.add(topic.topic)
+          delete processorsByTopic[topic.topic]
+          continue
+        }
+        if (processorBlockedTopics.has(topic.topic)) {
+          continue
+        }
+        const existing = processorsByTopic[topic.topic]
+        processorsByTopic[topic.topic] = existing?.type === 'point-cloud'
+          ? { type: 'point-cloud', maxPoints: Math.max(existing.maxPoints, topic.processor.maxPoints) }
+          : topic.processor
       }
     }
-    return { topics: Object.keys(modeByTopic).sort(), modeByTopic }
+    const plan: QueryPlan = { topics: Object.keys(modeByTopic).sort(), modeByTopic }
+    if (Object.keys(processorsByTopic).length > 0) {
+      plan.processorsByTopic = processorsByTopic
+    }
+    return plan
   }
 
   onSubscriptionsChanged(listener: (panelId: string) => void): () => void {

@@ -1,6 +1,6 @@
-# 基于 React & Next.js 的高性能 MCAP 播放器技术设计方案
+# 基于 React + Vite 的高性能 MCAP 播放器技术设计方案
 
-本方案为自主研发一个高性能、浏览器原生运行的 MCAP 录制文件播放器（MCAP Player）提供技术方案设计。方案吸取了 Foxglove 和 ROSView 的核心架构优势，并针对 React 19 + Next.js 16 技术栈进行了最佳方案优化，旨在确保百兆至吉字节（GB）级大文件的流畅播放与极速 Seek。
+本方案为自主研发一个高性能、浏览器原生运行的 MCAP 录制文件播放器（MCAP Player）提供技术方案设计。方案吸取了 Foxglove 和 ROSView 的核心架构优势，并针对 React 19 + Vite 7 SPA 技术栈进行了最佳方案优化，旨在确保百兆至吉字节（GB）级大文件的流畅播放与极速 Seek。
 
 ---
 
@@ -62,7 +62,7 @@ flowchart TB
 
 | 模块            | 推荐技术                                | 选型理由                                                                                                                                      |
 | :-------------- | :-------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------- |
-| **构建与编译**  | Next.js 16 + TS 5.x                     | 现代工程构建与 SSR/CSR 框架标配，内置 App Router，对 Web Worker / API Routes / 静态输出等有完善支持。                                         |
+| **构建与编译**  | Vite 7 + TS 6.x                         | 基于原生 ESM 的前端构建工具，对 React、Web Worker、静态资源与 WASM 提供直接支持。                                                              |
 | **前端框架**    | React 19 (或 React 18)                  | 利用其并发特性与现代组件生命周期管理 UI 状态。                                                                                                |
 | **状态管理**    | `zustand`                               | 轻量级、无模板代码的状态管理库。用于管理低频全局 UI 状态（如播放状态、选中话题、文件元数据等），作为 React 与 PlaybackController 之间的桥梁。 |
 | **线程通信**    | `comlink` (Google)                      | 优雅的 RPC 包装，将 Worker 的异步方法映射为 Promise 调用。                                                                                    |
@@ -272,20 +272,16 @@ mcap-viewer/
 │   ├── components/                  # 可复用基础 UI 组件
 │   │   └── ui/                      # 基础样式组件 (Button, Slider)
 │   │
-│   ├── i18n/                        # 国际化配置
-│   │   ├── config.ts
-│   │   └── request.ts
-│   │
 │   └── views/                       # 核心视窗面板
 │       ├── ControlBar/              # 底部控制栏与时间轴组件
 │       ├── TopicList/               # 左侧话题树
 │       └── panels/                  # 各类可视化展示面板
 │           └── RawMessageView/      # Raw Message 原始数据面板 (首期实现以供调试)
 │
-│   └── next-env.d.ts                # Next.js 类型声明
+│   └── vite-env.d.ts                # Vite 类型声明
 ├── package.json
 ├── tsconfig.json
-├── next.config.ts                   # Next.js 配置文件
+├── vite.config.ts                   # Vite 配置文件
 └── vitest.config.ts                 # 单元测试配置文件
 ```
 

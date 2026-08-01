@@ -1,16 +1,15 @@
 # 项目开发规范与 AI Agent 协作指南
 
-本文件定义了 **MCAPVIEW** 项目的代码规范、技术栈标准以及 AI Agent 在本项目的协作和写作规范。所有 AI Agent 在理解或修改本项目代码时，必须严格遵守本指南。
+本文件定义了 **mcap-player** 项目的代码规范、技术栈标准以及 AI Agent 在本项目的协作和写作规范。所有 AI Agent 在理解或修改本项目代码时，必须严格遵守本指南。
 
 ---
 
 ## 1. 技术栈与架构原则
 
 ### 核心技术栈
-* **框架**: Next.js 16 (App Router), React 19, TypeScript
+* **框架**: React 19 + Vite 8（SPA）, TypeScript
 * **样式**: Tailwind CSS v4 + Radix UI + Shadcn UI
 * **状态管理**: Zustand (用于管理布局和全局交互状态)
-* **国际化**: `next-intl` (多语言支持)
 * **代码校验**: ESLint (使用 `@antfu/eslint-config` 预设)
 
 ### 架构与设计原则
@@ -42,13 +41,13 @@
 
 ### React 与组件规范
 * **禁止默认导入 React**: 禁止使用 `import React from 'react'` 以及 `React.useState` 等类似方式。必须使用具体的命名导入，如 `import { useState } from 'react'`。
-* **无需重复声明 'use client'**: 由于入口页面 `src/app/page.tsx` 已声明 `'use client'`，其下导入的所有子组件均默认运行在客户端环境，无需刻意做客户端与服务端组件的强拆分。在编写新组件时，**无需**声明 `'use client'` 指令，因为它们会自动继承自入口组件的客户端环境。
+* **不使用 React Server Components**: Vite SPA 的所有组件都在浏览器执行。不要添加 `'use client'` 或 `'use server'` 指令；对浏览器 API 的兼容性检查应针对具体能力，而非 SSR 环境。
 
 ### CSS & UI规范
 * 优先使用 Tailwind CSS 类名进行布局与样式设计。
 * 避免使用 ad-hoc 的硬编码行内样式（`style={{...}}`），若必须动态修改样式，应通过 Tailwind 动态类或 CSS 自定义变量（CSS Variables）来实现。
 * 遵守 Shadcn UI 与 Radix UI 的无障碍（Accessibility）最佳实践。
-* Shadcn UI 组件系统: 本项目已集成 Shadcn UI。当需要实现的 UI 组件可以通过 Shadcn 库实现时，应优先使用或安装（使用 `pnpm dlx shadcn@latest add`），并在后续开发中统一复用该组件。
+* Shadcn UI 组件系统: 本项目已集成 Shadcn UI。当需要实现的 UI 组件可以通过 Shadcn 库实现时，应优先使用本地已按安装的组件或执行安装（使用 `pnpm dlx shadcn@latest add`），并在后续开发中统一复用该组件。
 
 
 ## 3. AI Agent 协作规范

@@ -18,7 +18,7 @@ export default function SideBar() {
       <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-muted-foreground bg-card">
         <Radio className="w-8 h-8 mb-3 text-muted-foreground/30 animate-pulse" />
         <p className="text-xs font-semibold">No MCAP File Loaded</p>
-        <p className="text-[10px] text-muted-foreground/60 mt-1.5 max-w-[185px] leading-relaxed">
+        <p className="text-[10px] text-muted-foreground/60 mt-1.5 max-w-46.25 leading-relaxed">
           Select
           {' '}
           <strong>File &gt; Open File...</strong>
@@ -147,7 +147,7 @@ export default function SideBar() {
 
               {/* Selected Channel Details Pane */}
               {selectedChannel && (
-                <div className="border-t border-border bg-card/60 p-3 space-y-2 shrink-0 max-h-[220px] overflow-auto">
+                <div className="border-t border-border bg-card/60 p-3 space-y-2 shrink-0 max-h-55 overflow-auto">
                   <div className="flex items-center gap-1.5 font-bold text-[9px] text-muted-foreground uppercase tracking-wide">
                     <Info className="w-3 h-3 text-primary" />
                     Channel Details
@@ -178,7 +178,7 @@ export default function SideBar() {
                         {selectedSchema.dataText && (
                           <div className="mt-1 space-y-1">
                             <div className="text-muted-foreground text-[9px]">Schema Definition:</div>
-                            <pre className="p-1.5 bg-background/80 border border-border/80 rounded-xs max-h-[85px] overflow-auto text-[9px] whitespace-pre-wrap break-all leading-tight text-muted-foreground font-mono select-all">
+                            <pre className="p-1.5 bg-background/80 border border-border/80 rounded-xs max-h-21.25 overflow-auto text-[9px] whitespace-pre-wrap break-all leading-tight text-muted-foreground font-mono select-all">
                               {selectedSchema.dataText}
                             </pre>
                           </div>

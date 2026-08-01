@@ -1,5 +1,3 @@
-'use client'
-
 import type { PanelConfig, PanelId } from './types'
 import { createContext, useCallback, useContext } from 'react'
 import { usePanelStore } from '@/stores/use-panel-store'

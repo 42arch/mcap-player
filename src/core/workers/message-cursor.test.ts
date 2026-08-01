@@ -84,6 +84,16 @@ describe('binary transfer helpers', () => {
     expect(buffers).toEqual([data.buffer])
   })
 
+  it('collects prepared point-cloud buffers for zero-copy transfer', () => {
+    const positions = new Float32Array([1, 2, 3])
+    const intensities = new Float32Array([4])
+    const buffers = getTransferableBuffers([
+      { payload: { positions, intensities } },
+    ] as any)
+
+    expect(buffers).toEqual([positions.buffer, intensities.buffer])
+  })
+
   it('preserves foxglove.Grid data as transferable bytes', () => {
     const source = new Uint8Array([0, 1, 2])
     const payload = sanitizePayload({

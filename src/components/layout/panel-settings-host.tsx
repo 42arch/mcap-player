@@ -1,5 +1,3 @@
-'use client'
-
 import { Settings2 } from 'lucide-react'
 import { Suspense } from 'react'
 import { getPanelDefinition } from '@/panels/core/panel-registry'

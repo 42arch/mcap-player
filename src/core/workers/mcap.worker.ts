@@ -1,12 +1,22 @@
 import type { DispatchModeByTopic } from './message-cursor'
+import type { MessageProcessorByTopic } from '@/core/message-processing'
+import { Buffer } from 'buffer/'
 import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'
 import { expose, transfer } from 'comlink'
 import { getValueByPath } from '@/core/parsers/value-extractor'
 import { getTransferableBuffers, isSlowBackfillChannel, MessageCursor } from './message-cursor'
+import { collectTimelineData } from './timeline-data'
 
 type BackfillPhase = 'all' | 'fast' | 'slow'
+
+// @foxglove/wasm-lz4 expects Node's Buffer when copying decompressed bytes.
+// Install the browser implementation only in this worker's global scope.
+const workerBuffer = Reflect.get(globalThis, 'Buffer')
+if (workerBuffer === undefined || workerBuffer === null) {
+  Reflect.set(globalThis, 'Buffer', Buffer)
+}
 
 class McapWorker {
   private reader: McapIndexedReader | null = null
@@ -125,6 +135,7 @@ class McapWorker {
     endTimeNs: bigint,
     topics: string[],
     dispatchModes: DispatchModeByTopic,
+    processorsByTopic: MessageProcessorByTopic = {},
   ) {
     if (!this.reader) {
       return []
@@ -143,7 +154,7 @@ class McapWorker {
     }
 
     this.lastEndTimeNs = endTimeNs
-    const messages = await this.cursor.drainUpTo(endTimeNs, dispatchModes)
+    const messages = await this.cursor.drainUpTo(endTimeNs, dispatchModes, processorsByTopic)
     return transfer(messages, getTransferableBuffers(messages))
   }
 
@@ -153,6 +164,7 @@ class McapWorker {
     preservePlaybackCursor = false,
     seekGeneration?: number,
     phase: BackfillPhase = 'all',
+    processorsByTopic: MessageProcessorByTopic = {},
   ) {
     if (!this.reader) {
       return []
@@ -171,6 +183,7 @@ class McapWorker {
       selectedTopics,
       'placeholder',
       isCanceled,
+      processorsByTopic,
     )
     if (isCanceled()) {
       return []
@@ -260,6 +273,25 @@ class McapWorker {
     }
 
     return { times, values }
+  }
+
+  async getMessageTimelineData(startTimeNs: bigint) {
+    const reader = this.reader
+    if (!reader) {
+      return []
+    }
+
+    const timelineData = await collectTimelineData({
+      channels: reader.channelsById.values(),
+      channelMessageCounts: reader.statistics?.channelMessageCounts,
+      messages: reader.readMessages(),
+      startTimeNs,
+    })
+
+    return transfer(
+      timelineData,
+      timelineData.map(topic => topic.times.buffer),
+    )
   }
 }
 

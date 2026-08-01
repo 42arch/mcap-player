@@ -60,6 +60,93 @@ describe('messagePipeline', () => {
     })
   })
 
+  it('uses the largest compatible point-cloud processor requested by subscribers', () => {
+    const pipeline = new MessagePipeline()
+    pipeline.subscribe({
+      panelId: 'three-d-small',
+      subscriptionId: 'points',
+      topics: [{
+        topic: '/points',
+        mode: 'latest',
+        processor: { type: 'point-cloud', maxPoints: 100000 },
+      }],
+    }, () => {})
+    pipeline.subscribe({
+      panelId: 'three-d-large',
+      subscriptionId: 'points',
+      topics: [{
+        topic: '/points',
+        mode: 'latest',
+        processor: { type: 'point-cloud', maxPoints: 300000 },
+      }],
+    }, () => {})
+
+    expect(pipeline.getQueryPlan().processorsByTopic).toEqual({
+      '/points': { type: 'point-cloud', maxPoints: 300000 },
+    })
+  })
+
+  it('disables worker preprocessing when a raw subscriber needs the same topic', () => {
+    const pipeline = new MessagePipeline()
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'points',
+      topics: [{
+        topic: '/points',
+        mode: 'latest',
+        processor: { type: 'point-cloud', maxPoints: 200000 },
+      }],
+    }, () => {})
+    pipeline.subscribe({
+      panelId: 'raw',
+      subscriptionId: 'points',
+      topics: [{ topic: '/points', mode: 'all' }],
+    }, () => {})
+
+    expect(pipeline.getQueryPlan().processorsByTopic).toBeUndefined()
+  })
+
+  it('omits a retained static topic only from eligible seek plans', () => {
+    const pipeline = new MessagePipeline()
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'map',
+      topics: [{
+        topic: '/map',
+        mode: 'latest',
+        retainOnSeek: timeNs => timeNs >= 5n,
+      }],
+    }, () => {})
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'points',
+      topics: [{ topic: '/points', mode: 'latest' }],
+    }, () => {})
+
+    expect(pipeline.getQueryPlan().topics).toEqual(['/map', '/points'])
+    expect(pipeline.getSeekQueryPlan(4n).topics).toEqual(['/map', '/points'])
+    expect(pipeline.getSeekQueryPlan(5n).topics).toEqual(['/points'])
+  })
+
+  it('keeps a retained topic in seek plans when another subscriber needs it', () => {
+    const pipeline = new MessagePipeline()
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'map',
+      topics: [{ topic: '/map', mode: 'latest', retainOnSeek: () => true }],
+    }, () => {})
+    pipeline.subscribe({
+      panelId: 'raw-map',
+      subscriptionId: 'message',
+      topics: [{ topic: '/map', mode: 'all' }],
+    }, () => {})
+
+    expect(pipeline.getSeekQueryPlan(10n)).toEqual({
+      topics: ['/map'],
+      modeByTopic: { '/map': 'all' },
+    })
+  })
+
   it('removes all subscriptions when a panel closes', () => {
     const pipeline = new MessagePipeline()
     pipeline.subscribe({

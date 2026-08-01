@@ -29,7 +29,7 @@ function JsonRow({ className, indentClass, onClick, copyText, children }: JsonRo
     <div
       onClick={onClick}
       className={cn(
-        'group/row flex items-center w-full select-none text-[10px] py-[1px] leading-normal font-mono relative',
+        'group/row flex items-center w-full select-none text-[10px] py-px leading-normal font-mono relative',
         indentClass,
         onClick && 'cursor-pointer hover:bg-muted/30',
         className,
@@ -40,7 +40,7 @@ function JsonRow({ className, indentClass, onClick, copyText, children }: JsonRo
       </div>
       <button
         onClick={handleCopy}
-        className="opacity-0 group-hover/row:opacity-100 ml-1 p-0.5 text-muted-foreground hover:text-primary hover:bg-muted/80 shrink-0 transition-opacity rounded-[2px]"
+        className="opacity-0 group-hover/row:opacity-100 ml-1 p-0.5 text-muted-foreground hover:text-primary hover:bg-muted/80 shrink-0 transition-opacity rounded-xs"
         title="Copy line"
       >
         {copied
@@ -185,7 +185,7 @@ function JsonNode({ name, value, depth, expandState, binaryFormat }: JsonNodePro
       {/* Node Header Row */}
       <JsonRow
         onClick={toggleExpand}
-        className="py-[1px]"
+        className="py-px"
         copyText={headerCopyText}
       >
         <div className="w-3 h-3 flex items-center justify-center text-zinc-400 dark:text-zinc-500 group-hover/row:text-foreground shrink-0 mr-0.5 select-none">

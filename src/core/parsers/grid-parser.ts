@@ -16,7 +16,7 @@ export interface ParsedGrid {
 interface GridField {
   name: string
   offset: number
-  type: unknown
+  type: number
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -81,11 +81,11 @@ function parseFieldType(value: unknown): number {
   return 2
 }
 
-function readField(view: DataView, offset: number, type: unknown): number {
+function readField(view: DataView, offset: number, type: number): number {
   if (offset < 0 || offset >= view.byteLength) {
     return 0
   }
-  switch (parseFieldType(type)) {
+  switch (type) {
     case 1: return view.getInt8(offset)
     case 2: return view.getUint8(offset)
     case 3: return offset + 2 <= view.byteLength ? view.getInt16(offset, true) : 0
@@ -109,7 +109,11 @@ function parseFields(value: unknown): GridField[] {
   return value.flatMap((field) => {
     const record = asRecord(field)
     return record
-      ? [{ name: String(record.name || '').toLowerCase(), offset: asNumber(record.offset), type: record.type }]
+      ? [{
+          name: String(record.name || '').toLowerCase(),
+          offset: asNumber(record.offset),
+          type: parseFieldType(record.type),
+        }]
       : []
   })
 }
@@ -139,7 +143,25 @@ export function parseGrid(payload: unknown): ParsedGrid | null {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
   const rgba = new Uint8Array(columns * rows * 4)
 
-  if (colorGrid && red && green && blue) {
+  const byteColorGrid = colorGrid
+    && red?.type === 2
+    && green?.type === 2
+    && blue?.type === 2
+    && (!alpha || alpha.type === 2)
+
+  if (byteColorGrid && red && green && blue) {
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        const source = row * rowStride + column * cellStride
+        const target = (row * columns + column) * 4
+        rgba[target] = data[source + red.offset] || 0
+        rgba[target + 1] = data[source + green.offset] || 0
+        rgba[target + 2] = data[source + blue.offset] || 0
+        rgba[target + 3] = alpha ? (data[source + alpha.offset] ?? 0) : 255
+      }
+    }
+  }
+  else if (colorGrid && red && green && blue) {
     for (let row = 0; row < rows; row++) {
       for (let column = 0; column < columns; column++) {
         const source = row * rowStride + column * cellStride

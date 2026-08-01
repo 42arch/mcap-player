@@ -9,7 +9,12 @@ export function getThreeDTopicKind(schemaName: string | undefined, topic: string
   const schema = (schemaName || '').toLowerCase()
   const topicName = topic.toLowerCase()
 
-  if (schema.includes('frametransform') || schema.includes('tfmessage')) {
+  if (
+    schema.includes('frametransform')
+    || schema.includes('tfmessage')
+    || topicName === '/tf'
+    || topicName === '/tf_static'
+  ) {
     return 'transform'
   }
   if (topicName.includes('robot_description') || schema.includes('urdf')) {

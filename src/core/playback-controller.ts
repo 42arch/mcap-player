@@ -1,3 +1,4 @@
+import type { TimelineTopicData } from '@/core/workers/timeline-data'
 import { wrap } from 'comlink'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -21,23 +22,22 @@ export class PlaybackController {
   private seekGeneration = 0
   private pendingSeekBackfill: PendingSeekBackfill | null = null
   private isSeekBackfillRunning = false
+  private timelineDataPromise: Promise<TimelineTopicData[]> | null = null
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      globalMessagePipeline.onSubscriptionsChanged((panelId) => {
-        this.pendingBackfillPanelIds.add(panelId)
-        if (this.backfillScheduled) {
-          return
-        }
-        this.backfillScheduled = true
-        queueMicrotask(() => {
-          this.backfillScheduled = false
-          const panelIds = Array.from(this.pendingBackfillPanelIds)
-          this.pendingBackfillPanelIds.clear()
-          this.triggerBackfill(panelIds)
-        })
+    globalMessagePipeline.onSubscriptionsChanged((panelId) => {
+      this.pendingBackfillPanelIds.add(panelId)
+      if (this.backfillScheduled) {
+        return
+      }
+      this.backfillScheduled = true
+      queueMicrotask(() => {
+        this.backfillScheduled = false
+        const panelIds = Array.from(this.pendingBackfillPanelIds)
+        this.pendingBackfillPanelIds.clear()
+        this.triggerBackfill(panelIds)
       })
-    }
+    })
   }
 
   triggerBackfill(panelIds?: readonly string[]) {
@@ -51,7 +51,14 @@ export class PlaybackController {
       this.queryVersion++
       const version = this.queryVersion
       const isTargetedBackfill = Boolean(panelIds?.length)
-      worker.getBackfillMessages(ns, plan.topics, isTargetedBackfill).then((messages: any[]) => {
+      worker.getBackfillMessages(
+        ns,
+        plan.topics,
+        isTargetedBackfill,
+        undefined,
+        'all',
+        plan.processorsByTopic,
+      ).then((messages: any[]) => {
         if (version !== this.queryVersion) {
           return
         }
@@ -68,12 +75,10 @@ export class PlaybackController {
   }
 
   private getWorker() {
-    if (typeof window === 'undefined') {
-      return null
-    }
     if (!this.worker) {
       const rawWorker = new Worker(
         new URL('./workers/mcap.worker.ts', import.meta.url),
+        { type: 'module' },
       )
       this.worker = wrap(rawWorker)
     }
@@ -82,11 +87,8 @@ export class PlaybackController {
 
   async loadFile(file: File) {
     this.pause()
+    this.timelineDataPromise = null
     const worker = this.getWorker()
-    if (!worker) {
-      return
-    }
-
     const summary = await worker.initialize(file)
     this.fileSummary = summary
     this.clock = new PlaybackClock(summary.startNs, summary.endNs)
@@ -181,7 +183,7 @@ export class PlaybackController {
           this.isQuerying = true
           const queryEnd = current
           const version = this.queryVersion
-          worker.getMessages(start, queryEnd, plan.topics, plan.modeByTopic)
+          worker.getMessages(start, queryEnd, plan.topics, plan.modeByTopic, plan.processorsByTopic)
             .then((messages: any[]) => {
               if (version !== this.queryVersion) {
                 return
@@ -217,9 +219,12 @@ export class PlaybackController {
       while (this.pendingSeekBackfill) {
         const request = this.pendingSeekBackfill
         this.pendingSeekBackfill = null
-        const plan = globalMessagePipeline.getQueryPlan()
+        const plan = globalMessagePipeline.getSeekQueryPlan(request.timeNs)
         const worker = this.getWorker()
         if (plan.topics.length === 0 || !worker) {
+          if (request.generation === this.seekGeneration) {
+            globalMessagePipeline.emitSeekComplete(request.timeNs)
+          }
           continue
         }
 
@@ -230,6 +235,7 @@ export class PlaybackController {
             false,
             request.generation,
             'fast',
+            plan.processorsByTopic,
           )
           if (request.generation !== this.seekGeneration) {
             continue
@@ -242,6 +248,7 @@ export class PlaybackController {
             false,
             request.generation,
             'slow',
+            plan.processorsByTopic,
           )
           if (request.generation === this.seekGeneration) {
             globalMessagePipeline.dispatchSeekResult(slowMessages)
@@ -281,6 +288,29 @@ export class PlaybackController {
       return { times: [], values: [] }
     }
     return worker.getTopicFieldValues(topic, path, startNs)
+  }
+
+  getMessageTimelineData(): Promise<TimelineTopicData[]> {
+    if (!this.fileSummary) {
+      return Promise.resolve([])
+    }
+    if (this.timelineDataPromise) {
+      return this.timelineDataPromise
+    }
+
+    const worker = this.getWorker()
+    if (!worker) {
+      return Promise.resolve([])
+    }
+
+    const request = worker.getMessageTimelineData(this.fileSummary.startNs) as Promise<TimelineTopicData[]>
+    this.timelineDataPromise = request
+    request.catch(() => {
+      if (this.timelineDataPromise === request) {
+        this.timelineDataPromise = null
+      }
+    })
+    return request
   }
 }
 

@@ -1,13 +1,54 @@
-import type { ImagePanelConfig, PlotPanelConfig, RawMessagePanelConfig, ThreeDPanelConfig } from '@/panels/core/types'
+import type {
+  ImagePanelConfig,
+  PlotPanelConfig,
+  RawMessagePanelConfig,
+  ThreeDPanelConfig,
+  TimelinePanelConfig,
+} from '@/panels/core/types'
+import { registerBuiltInSceneAdapters } from '@/panels/builtins/three-d/register-built-in-scene-adapters'
+import { registerBuiltInSceneRenderers } from '@/panels/builtins/three-d/register-built-in-scene-renderers'
 import { registerPanel } from '@/panels/core/panel-registry'
 
 let registered = false
+
+function createDefaultThreeDConfig(): ThreeDPanelConfig {
+  return {
+    selectedTopic: null,
+    selectedLayerId: null,
+    visibleTopics: {},
+    layerSettings: {},
+    labelFieldsByTopic: {},
+    fixedFrame: 'auto',
+    pointSize: 2,
+    colorMode: 'height',
+    solidColor: '#00ffcc',
+    backgroundColor: '#ffffff',
+    maxPoints: 200000,
+    showGrid: true,
+    showAxes: true,
+  }
+}
+
+function migrateThreeDConfig(config: unknown): ThreeDPanelConfig {
+  const previous = config && typeof config === 'object'
+    ? config as Partial<ThreeDPanelConfig>
+    : {}
+  return {
+    ...createDefaultThreeDConfig(),
+    ...previous,
+    fixedFrame: typeof previous.fixedFrame === 'string' && previous.fixedFrame.trim()
+      ? previous.fixedFrame
+      : 'auto',
+  }
+}
 
 export function registerBuiltInPanels() {
   if (registered) {
     return
   }
   registered = true
+  registerBuiltInSceneRenderers()
+  registerBuiltInSceneAdapters()
 
   registerPanel({
     type: 'overview',
@@ -69,23 +110,24 @@ export function registerBuiltInPanels() {
     loadSettings: () => import('@/panels/builtins/plot/plot-setting'),
   })
 
+  registerPanel<TimelinePanelConfig>({
+    type: 'timeline',
+    title: 'Message Timeline',
+    configVersion: 1,
+    createDefaultConfig: () => ({
+      visibleTopics: null,
+    }),
+    loadPanel: () => import('@/panels/builtins/timeline/timeline-panel'),
+    loadSettings: () => import('@/panels/builtins/timeline/timeline-setting'),
+  })
+
   registerPanel<ThreeDPanelConfig>({
     type: '3d',
     title: '3D Spatial View',
-    configVersion: 1,
-    createDefaultConfig: () => ({
-      selectedTopic: null,
-      visibleTopics: {},
-      labelFieldsByTopic: {},
-      pointSize: 2,
-      colorMode: 'height',
-      solidColor: '#00ffcc',
-      backgroundColor: '#ffffff',
-      maxPoints: 200000,
-      showGrid: true,
-      showAxes: true,
-    }),
+    configVersion: 3,
+    createDefaultConfig: createDefaultThreeDConfig,
     loadPanel: () => import('@/panels/builtins/three-d/three-d-panel'),
     loadSettings: () => import('@/panels/builtins/three-d/three-d-setting'),
+    migrateConfig: migrateThreeDConfig,
   })
 }

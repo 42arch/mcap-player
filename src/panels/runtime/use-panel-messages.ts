@@ -1,5 +1,3 @@
-'use client'
-
 import type { PlaybackMessage, TopicSubscription } from './message-pipeline'
 import { useEffect, useRef } from 'react'
 import { globalMessagePipeline } from './message-pipeline'

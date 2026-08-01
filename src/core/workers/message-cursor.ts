@@ -3,7 +3,9 @@ import { parse } from '@foxglove/rosmsg'
 import { MessageReader as Ros2Reader } from '@foxglove/rosmsg2-serialization'
 import { MessageReader as Ros1Reader } from '@foxglove/rosmsg-serialization'
 import protobuf from 'protobufjs'
+import type { MessageProcessor, MessageProcessorByTopic } from '@/core/message-processing'
 import { checkH264IsKeyframe, isH264Format } from '@/core/parsers/h264'
+import { preparePointCloud } from '@/core/parsers/point-cloud-parser'
 import { SceneUpdateState } from '@/core/parsers/scene-update-parser'
 import 'protobufjs/ext/descriptor'
 
@@ -64,6 +66,8 @@ interface BackfillCheckpoint<T> {
 
 const STATE_CHECKPOINT_INTERVAL_NS = 30_000_000_000n
 const MAX_STATE_CHECKPOINTS_PER_TOPIC = 64
+const MAX_READ_AHEAD_MESSAGES = 64
+const MAX_READ_AHEAD_BYTES = 8 * 1024 * 1024
 
 function getSingleTransformChildFrame(payload: any): string {
   const value = payload?.child_frame_id || payload?.childFrameId
@@ -152,9 +156,10 @@ export function getTransferableBuffers(messages: readonly DecodedMessage[]): Arr
   const buffers = new Set<ArrayBuffer>()
 
   for (const { payload } of messages) {
-    const data = payload?.data
-    if (ArrayBuffer.isView(data) && data.buffer instanceof ArrayBuffer) {
-      buffers.add(data.buffer)
+    for (const value of [payload?.data, payload?.positions, payload?.intensities]) {
+      if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
+        buffers.add(value.buffer)
+      }
     }
   }
 
@@ -280,6 +285,7 @@ export class MessageCursor {
   private iterator: any = null
   private isPumping = false
   private hasEnded = false
+  private cursorGeneration = 0
 
   // Configuration
   private topics: string[] = []
@@ -301,6 +307,7 @@ export class MessageCursor {
   }
 
   clear() {
+    this.cursorGeneration++
     this.queue = []
     this.totalBytes = 0
     this.iterator = null
@@ -310,6 +317,7 @@ export class MessageCursor {
 
   reset(startTimeNs: bigint, topics: string[], binaryFormat: 'placeholder' | 'hex' | 'raw') {
     this.clear()
+    const generation = this.cursorGeneration
     this.topics = topics
     this.binaryFormat = binaryFormat
 
@@ -324,22 +332,27 @@ export class MessageCursor {
     })
 
     // Fire off asynchronous background pump
-    this.pump().catch(err => console.error('Error in background message pump:', err))
+    this.pump(generation).catch(err => console.error('Error in background message pump:', err))
   }
 
-  private async pump() {
+  private async pump(generation = this.cursorGeneration) {
     if (this.isPumping || this.hasEnded || !this.iterator) {
       return
     }
+    const iterator = this.iterator
     this.isPumping = true
 
     try {
       while (
-        this.iterator
-        && this.queue.length < 500
-        && this.totalBytes < 20 * 1024 * 1024
+        generation === this.cursorGeneration
+        && iterator === this.iterator
+        && this.queue.length < MAX_READ_AHEAD_MESSAGES
+        && this.totalBytes < MAX_READ_AHEAD_BYTES
       ) {
-        const next = await this.iterator.next()
+        const next = await iterator.next()
+        if (generation !== this.cursorGeneration || iterator !== this.iterator) {
+          return
+        }
         if (next.done) {
           this.hasEnded = true
           break
@@ -349,15 +362,20 @@ export class MessageCursor {
       }
     }
     catch (err) {
+      if (generation !== this.cursorGeneration || iterator !== this.iterator) {
+        return
+      }
       console.error('Error pumping message in worker cursor:', err)
       this.hasEnded = true
     }
     finally {
-      this.isPumping = false
+      if (generation === this.cursorGeneration) {
+        this.isPumping = false
+      }
     }
   }
 
-  private decodeMessage(msg: any): DecodedMessage | null {
+  private decodeMessage(msg: any, processor?: MessageProcessor): DecodedMessage | null {
     if (!this.reader) {
       return null
     }
@@ -369,7 +387,11 @@ export class MessageCursor {
     const deserialize = this.getDeserializer(msg.channelId)
     let payload = null
     try {
-      payload = sanitizePayload(deserialize(msg.data), this.binaryFormat)
+      const decodedPayload = deserialize(msg.data)
+      const preparedPointCloud = processor?.type === 'point-cloud'
+        ? preparePointCloud(decodedPayload, processor.maxPoints)
+        : null
+      payload = preparedPointCloud ?? sanitizePayload(decodedPayload, this.binaryFormat)
     }
     catch (err: any) {
       payload = { error: err.message || 'Deserialization error' }
@@ -465,7 +487,11 @@ export class MessageCursor {
     return deserializer
   }
 
-  async drainUpTo(endTimeNs: bigint, dispatchModes: DispatchModeByTopic): Promise<DecodedMessage[]> {
+  async drainUpTo(
+    endTimeNs: bigint,
+    dispatchModes: DispatchModeByTopic,
+    processorsByTopic: MessageProcessorByTopic = {},
+  ): Promise<DecodedMessage[]> {
     // If the pump hasn't read up to endTimeNs yet, and we haven't hit the end of the file,
     // block and pump synchronously until we reach endTimeNs or the file ends.
     while (
@@ -503,18 +529,23 @@ export class MessageCursor {
     // Re-trigger background pump asynchronously to top up the buffer
     this.pump().catch(err => console.error('Error replenishing background buffer:', err))
 
-    return this.decodeReadyMessages(ready, dispatchModes)
+    return this.decodeReadyMessages(ready, dispatchModes, processorsByTopic)
   }
 
   private enqueue(message: any) {
+    const data = copyBinaryPayload(message.data)
     this.queue.push({
-      message,
-      dataLength: message.data.byteLength,
+      message: { ...message, data },
+      dataLength: data.byteLength,
     })
-    this.totalBytes += message.data.byteLength
+    this.totalBytes += data.byteLength
   }
 
-  private decodeReadyMessages(messages: BufferedMessage[], dispatchModes: DispatchModeByTopic): DecodedMessage[] {
+  private decodeReadyMessages(
+    messages: BufferedMessage[],
+    dispatchModes: DispatchModeByTopic,
+    processorsByTopic: MessageProcessorByTopic,
+  ): DecodedMessage[] {
     const rawMessages = messages.map(({ message }) => message)
     const latestByTopic = new Map<string, unknown>()
     for (const message of rawMessages) {
@@ -532,7 +563,10 @@ export class MessageCursor {
     })
 
     return selected
-      .map(message => this.decodeMessage(message))
+      .map((message) => {
+        const topic = this.reader?.channelsById.get(message.channelId)?.topic
+        return this.decodeMessage(message, topic ? processorsByTopic[topic] : undefined)
+      })
       .filter((message): message is DecodedMessage => message !== null)
   }
 
@@ -762,6 +796,7 @@ export class MessageCursor {
     topics: string[],
     binaryFormat: 'placeholder' | 'hex' | 'raw',
     isCanceled: () => boolean = () => false,
+    processorsByTopic: MessageProcessorByTopic = {},
   ): Promise<DecodedMessage[]> {
     if (!this.reader || topics.length === 0 || isCanceled()) {
       return []
@@ -820,7 +855,7 @@ export class MessageCursor {
         continue
       }
 
-      const decoded = this.decodeMessage(msg)
+      const decoded = this.decodeMessage(msg, processorsByTopic[channel.topic])
       if (!decoded) {
         continue
       }

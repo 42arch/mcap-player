@@ -50,13 +50,23 @@ export interface PlotSeries {
 }
 
 export interface ThreeDSettings {
+  /** @deprecated Use selectedLayerId. */
   selectedTopic: string | null
+  selectedLayerId: string | null
   visibleTopics: Record<string, boolean>
+  layerSettings: Record<string, Record<string, unknown>>
+  /** @deprecated Stored for version-2 configuration compatibility. */
   labelFieldsByTopic: Record<string, string[]>
+  /** "auto" resolves to the root of the observed transform graph. */
+  fixedFrame: string
+  /** @deprecated Point-cloud renderers now store settings per layer. */
   pointSize: number
+  /** @deprecated Point-cloud renderers now store settings per layer. */
   colorMode: 'height' | 'intensity' | 'solid'
+  /** @deprecated Point-cloud renderers now store settings per layer. */
   solidColor: string
   backgroundColor: string
+  /** @deprecated Point-cloud renderers now store settings per layer. */
   maxPoints: number
   showGrid: boolean
   showAxes: boolean

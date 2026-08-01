@@ -30,6 +30,7 @@ export function usePlaybackControls() {
   const fileSummary = usePlayerStore(state => state.fileSummary)
 
   const durationNs = fileSummary ? fileSummary.durationNs : 0n
+  const startNs = fileSummary ? fileSummary.startNs : 0n
   const elapsedSeconds = Number(elapsedNs) / 1_000_000_000
   const durationSeconds = Number(durationNs) / 1_000_000_000
 
@@ -81,5 +82,7 @@ export function usePlaybackControls() {
     playbackSpeed,
     elapsedSeconds,
     durationSeconds,
+    startNs,
+    fileSummary,
   }
 }

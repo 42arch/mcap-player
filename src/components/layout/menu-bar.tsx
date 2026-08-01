@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
 
 interface MenuBarProps {
@@ -28,12 +29,19 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
   const setIsLoading = usePlayerStore(state => state.setIsLoading)
   const setFileSummary = usePlayerStore(state => state.setFileSummary)
   const setError = usePlayerStore(state => state.setError)
+  const resetPanels = usePanelStore(state => state.resetPanels)
+
+  const handleCloseFile = () => {
+    resetPanels()
+    setFileSummary(null)
+  }
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file)
       return
 
+    resetPanels()
     setIsLoading(true, 'Reading MCAP file...')
     try {
       await globalPlaybackController.loadFile(file)
@@ -79,7 +87,7 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
             </MenubarItem>
             <MenubarItem
               disabled={!fileSummary}
-              onClick={() => setFileSummary(null)}
+              onClick={handleCloseFile}
               className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
             >
               Close File

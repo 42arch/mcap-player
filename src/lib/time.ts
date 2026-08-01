@@ -1,4 +1,4 @@
-export function formatNanoseconds(ns: bigint): string {
+export function formatNanoseconds(ns: bigint, digits = 9): string {
   const ms = Number(ns / 1_000_000n)
   const date = new Date(ms)
   const pad = (n: number, width = 2) => String(n).padStart(width, '0')
@@ -10,20 +10,31 @@ export function formatNanoseconds(ns: bigint): string {
   const min = pad(date.getMinutes())
   const ss = pad(date.getSeconds())
 
-  // Extract remaining nanoseconds
-  const extraNs = pad(Number(ns % 1_000_000_000n), 9)
+  if (digits <= 0) {
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`
+  }
 
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}.${extraNs}`
+  // Extract remaining nanoseconds truncated to requested precision
+  const extraNs = pad(Number(ns % 1_000_000_000n), 9)
+  const subSec = extraNs.slice(0, digits)
+
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}.${subSec}`
 }
 
-export function formatDuration(ns: bigint): string {
+export function formatDuration(ns: bigint, digits = 9): string {
   const pad = (n: number, width = 2) => String(n).padStart(width, '0')
   const totalSecs = Number(ns / 1_000_000_000n)
   const hours = Math.floor(totalSecs / 3600)
   const mins = Math.floor((totalSecs % 3600) / 60)
   const secs = totalSecs % 60
-  const ms = pad(Number((ns % 1_000_000_000n) / 1_000_000n), 3)
-  return `${pad(hours)}:${pad(mins)}:${pad(secs)}.${ms}`
+
+  if (digits <= 0) {
+    return `${pad(hours)}:${pad(mins)}:${pad(secs)}`
+  }
+
+  const extraNs = pad(Number(ns % 1_000_000_000n), 9)
+  const subSec = extraNs.slice(0, digits)
+  return `${pad(hours)}:${pad(mins)}:${pad(secs)}.${subSec}`
 }
 
 export function formatBytes(bytes: number): string {

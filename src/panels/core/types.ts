@@ -25,6 +25,10 @@ export interface PlotPanelConfig extends PanelConfig {
   availableFieldsByTopic: Record<string, string[]>
 }
 
+export interface TimelinePanelConfig extends PanelConfig {
+  visibleTopics: string[] | null
+}
+
 export interface ThreeDPanelConfig extends PanelConfig, ThreeDSettings {}
 
 export interface PanelComponentProps<C extends PanelConfig = PanelConfig> {

@@ -2,7 +2,7 @@ export type UrdfGeometry
   = | { type: 'box', size: [number, number, number] }
     | { type: 'cylinder', radius: number, length: number }
     | { type: 'sphere', radius: number }
-    | { type: 'mesh', scale: [number, number, number] }
+    | { type: 'mesh', filename: string, scale: [number, number, number] }
 
 export interface UrdfVisual {
   id: string
@@ -14,11 +14,14 @@ export interface UrdfVisual {
 
 export interface UrdfLink {
   name: string
+  position: [number, number, number]
+  orientation: [number, number, number, number]
   visuals: UrdfVisual[]
 }
 
 export interface UrdfRobot {
   name: string
+  rootFrame: string
   links: UrdfLink[]
 }
 
@@ -53,6 +56,37 @@ function rpyToQuaternion([roll, pitch, yaw]: number[]): [number, number, number,
   ]
 }
 
+interface UrdfPose {
+  position: [number, number, number]
+  orientation: [number, number, number, number]
+}
+
+function composePoses(parent: UrdfPose, child: UrdfPose): UrdfPose {
+  const [qx, qy, qz, qw] = parent.orientation
+  const [x, y, z] = child.position
+  const uvx = qy * z - qz * y
+  const uvy = qz * x - qx * z
+  const uvz = qx * y - qy * x
+  const uuvx = qy * uvz - qz * uvy
+  const uuvy = qz * uvx - qx * uvz
+  const uuvz = qx * uvy - qy * uvx
+  const [cx, cy, cz, cw] = child.orientation
+
+  return {
+    position: [
+      parent.position[0] + x + 2 * (qw * uvx + uuvx),
+      parent.position[1] + y + 2 * (qw * uvy + uuvy),
+      parent.position[2] + z + 2 * (qw * uvz + uuvz),
+    ],
+    orientation: [
+      qw * cx + qx * cw + qy * cz - qz * cy,
+      qw * cy - qx * cz + qy * cw + qz * cx,
+      qw * cz + qx * cy - qy * cx + qz * cw,
+      qw * cw - qx * cx - qy * cy - qz * cz,
+    ],
+  }
+}
+
 function parseGeometry(geometry: Element): UrdfGeometry | null {
   const box = geometry.querySelector('box')
   if (box) {
@@ -68,7 +102,11 @@ function parseGeometry(geometry: Element): UrdfGeometry | null {
   }
   const mesh = geometry.querySelector('mesh')
   if (mesh) {
-    return { type: 'mesh', scale: numberList(mesh.getAttribute('scale'), [0.12, 0.12, 0.12]) as [number, number, number] }
+    return {
+      type: 'mesh',
+      filename: mesh.getAttribute('filename')?.trim() || '',
+      scale: numberList(mesh.getAttribute('scale'), [1, 1, 1]) as [number, number, number],
+    }
   }
   return null
 }
@@ -84,10 +122,56 @@ export function parseUrdfRobot(xml: unknown): UrdfRobot | null {
     return null
   }
 
+  const linkElements = Array.from(robot.querySelectorAll('link'))
+  const identityPose = (): UrdfPose => ({
+    position: [0, 0, 0],
+    orientation: [0, 0, 0, 1],
+  })
+  const jointByChild = new Map<string, { parent: string, pose: UrdfPose }>()
+  const childLinks = new Set<string>()
+  for (const joint of robot.querySelectorAll('joint')) {
+    const parent = joint.querySelector('parent')?.getAttribute('link')?.trim()
+    const child = joint.querySelector('child')?.getAttribute('link')?.trim()
+    if (!parent || !child) {
+      continue
+    }
+    childLinks.add(child)
+    const origin = joint.querySelector('origin')
+    jointByChild.set(child, {
+      parent,
+      pose: {
+        position: numberList(origin?.getAttribute('xyz') || null, [0, 0, 0]) as [number, number, number],
+        orientation: rpyToQuaternion(numberList(origin?.getAttribute('rpy') || null, [0, 0, 0])),
+      },
+    })
+  }
+
+  const posesByLink = new Map<string, UrdfPose>()
+  const resolving = new Set<string>()
+  const resolveLinkPose = (linkName: string): UrdfPose => {
+    const cached = posesByLink.get(linkName)
+    if (cached) {
+      return cached
+    }
+    const joint = jointByChild.get(linkName)
+    if (!joint || resolving.has(linkName)) {
+      return identityPose()
+    }
+    resolving.add(linkName)
+    const pose = composePoses(resolveLinkPose(joint.parent), joint.pose)
+    resolving.delete(linkName)
+    posesByLink.set(linkName, pose)
+    return pose
+  }
+
   return {
     name: robot.getAttribute('name') || 'Robot',
-    links: Array.from(robot.querySelectorAll('link')).map((link) => {
+    rootFrame: linkElements.find(link => !childLinks.has(link.getAttribute('name') || ''))?.getAttribute('name')
+      || linkElements[0]?.getAttribute('name')
+      || 'base_link',
+    links: linkElements.map((link) => {
       const name = link.getAttribute('name') || 'unnamed-link'
+      const pose = resolveLinkPose(name)
       const visuals = Array.from(link.children)
         .filter(child => child.tagName === 'visual')
         .map((visual, index): UrdfVisual | null => {
@@ -107,7 +191,12 @@ export function parseUrdfRobot(xml: unknown): UrdfRobot | null {
           }
         })
         .filter((visual): visual is UrdfVisual => visual !== null)
-      return { name, visuals }
+      return {
+        name,
+        position: pose.position,
+        orientation: pose.orientation,
+        visuals,
+      }
     }),
   }
 }

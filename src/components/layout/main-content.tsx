@@ -1,5 +1,6 @@
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
 import LandingView from './landing-view'
 import PanelWorkspace from './panel-workspace'
@@ -15,6 +16,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
   const error = usePlayerStore(state => state.error)
   const setIsLoading = usePlayerStore(state => state.setIsLoading)
   const setError = usePlayerStore(state => state.setError)
+  const resetPanels = usePanelStore(state => state.resetPanels)
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -22,6 +24,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
       return
     }
 
+    resetPanels()
     setIsLoading(true, 'Initializing decompression handlers...')
     try {
       await globalPlaybackController.loadFile(file)
@@ -38,7 +41,7 @@ export default function MainContent({ darkMode }: MainContentProps) {
       <div className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-muted-foreground select-none">
         <Loader2 className="w-8 h-8 animate-spin text-primary mb-3" />
         <p className="text-xs font-semibold text-foreground">{loadingMessage || 'Loading...'}</p>
-        <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[220px] text-center">
+        <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-55 text-center">
           Reading indexes and preparing metadata structures.
         </p>
       </div>
