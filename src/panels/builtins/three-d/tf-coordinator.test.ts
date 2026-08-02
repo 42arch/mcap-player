@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
+import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { FrameTransformCoordinator } from './tf-coordinator'
 
 describe('frameTransformCoordinator', () => {
@@ -146,6 +147,25 @@ describe('frameTransformCoordinator', () => {
     expect(coordinator.getFixedFrameSnapshot()).toBe('world')
   })
 
+  it('selects the same conventional fixed frame regardless of TF insertion order', () => {
+    const coordinator = new FrameTransformCoordinator()
+
+    coordinator.consume({
+      parent_frame_id: 'odom',
+      child_frame_id: 'body',
+      translation: { x: 1, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    })
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'unrelated_sensor',
+      translation: { x: 2, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    })
+
+    expect(coordinator.getFixedFrameSnapshot()).toBe('world')
+  })
+
   it('lets the panel fixed-frame setting override automatic root selection', () => {
     const coordinator = new FrameTransformCoordinator()
     const base = new THREE.Group()
@@ -205,6 +225,116 @@ describe('frameTransformCoordinator', () => {
 
     expect(coordinator.getFixedFrameSnapshot()).toBe('new_world')
     expect(camera.position.x).toBeCloseTo(2)
+  })
+
+  it('uses one deterministic authority when TF topics publish the same child', () => {
+    const coordinator = new FrameTransformCoordinator()
+    const body = new THREE.Group()
+    coordinator.registerFrameTarget(body, 'body')
+
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'body',
+      translation: { x: 1, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/refined/tf')
+    expect(body.position.x).toBeCloseTo(1)
+
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'body',
+      translation: { x: 2, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/tf')
+    expect(body.position.x).toBeCloseTo(2)
+
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'body',
+      translation: { x: 3, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/refined/tf')
+    expect(body.position.x).toBeCloseTo(2)
+
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'body',
+      translation: { x: 4, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/tf')
+    expect(body.position.x).toBeCloseTo(4)
+  })
+
+  it('lets dynamic TF override a conflicting static transform', () => {
+    const coordinator = new FrameTransformCoordinator()
+    const lidar = new THREE.Group()
+    coordinator.registerFrameTarget(lidar, 'lidar')
+
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'lidar',
+      translation: { x: 1, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/tf_static')
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'lidar',
+      translation: { x: 2, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/refined/tf')
+    coordinator.consume({
+      parent_frame_id: 'world',
+      child_frame_id: 'lidar',
+      translation: { x: 3, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    }, false, '/tf_static')
+
+    expect(lidar.position.x).toBeCloseTo(2)
+  })
+
+  it('applies the authoritative TF snapshot atomically after seek', () => {
+    const panelId = 'tf-seek-atomic-test'
+    const coordinator = new FrameTransformCoordinator(panelId)
+    const body = new THREE.Group()
+    coordinator.registerFrameTarget(body, 'body')
+    coordinator.connect(['/refined/tf', '/tf'])
+
+    const message = (topic: string, x: number, transformSnapshot = false) => ({
+      topic,
+      channelId: 1,
+      logTime: 1n,
+      publishTime: 1n,
+      sequence: 1,
+      dataLength: 0,
+      transformSnapshot,
+      payload: {
+        parent_frame_id: 'world',
+        child_frame_id: 'body',
+        translation: { x, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+      },
+    })
+
+    try {
+      globalMessagePipeline.dispatchToPanel(panelId, [message('/tf', 1)])
+      expect(body.position.x).toBeCloseTo(1)
+
+      globalMessagePipeline.emitSeek(10n)
+      globalMessagePipeline.dispatchToPanel(panelId, [
+        message('/refined/tf', 100, true),
+        message('/tf', 2),
+      ])
+      expect(body.position.x).toBeCloseTo(1)
+
+      globalMessagePipeline.emitSeekComplete(10n)
+      expect(body.position.x).toBeCloseTo(2)
+
+      globalMessagePipeline.dispatchToPanel(panelId, [message('/refined/tf', 200)])
+      expect(body.position.x).toBeCloseTo(2)
+    }
+    finally {
+      coordinator.disconnect()
+    }
   })
 
   it('keeps frame targets registered while transform subscriptions reconnect', () => {

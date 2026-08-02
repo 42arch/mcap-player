@@ -15,9 +15,11 @@ import {
 } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { getPlaybackElapsedNs, subscribePlaybackTime } from '@/core/playback-time-store'
+import { cancelFrame, scheduleFrame } from '@/core/raf-scheduler'
 import {
-  findVisibleTimestampRange,
-  lowerBoundTimestamp,
+  findNearestTimelineTimestamp,
+  findVisibleTimelineBucketRange,
 } from '@/core/workers/timeline-data'
 import { formatDuration, formatNanoseconds } from '@/lib/time'
 import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
@@ -52,26 +54,6 @@ function formatAxisTime(seconds: number, durationSeconds: number): string {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
   }
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
-}
-
-function findNearestTimestampIndex(times: BigUint64Array, targetTimeNs: bigint): number {
-  if (times.length === 0) {
-    return -1
-  }
-
-  const insertionIndex = lowerBoundTimestamp(times, targetTimeNs)
-  if (insertionIndex === 0) {
-    return 0
-  }
-  if (insertionIndex === times.length) {
-    return times.length - 1
-  }
-
-  const before = times[insertionIndex - 1]
-  const after = times[insertionIndex]
-  return targetTimeNs - before <= after - targetTimeNs
-    ? insertionIndex - 1
-    : insertionIndex
 }
 
 function TimelineEmptyState({
@@ -109,7 +91,6 @@ export default function TimelinePanel({
   config,
 }: PanelComponentProps<TimelinePanelConfig>) {
   const fileSummary = usePlayerStore(state => state.fileSummary)
-  const elapsedNs = usePlayerStore(state => state.elapsedNs)
   const { resolvedTheme } = useTheme()
 
   const chartRef = useRef<UPlotChartHandle>(null)
@@ -117,13 +98,12 @@ export default function TimelinePanel({
   const tooltipTopicRef = useRef<HTMLDivElement>(null)
   const tooltipRelativeTimeRef = useRef<HTMLSpanElement>(null)
   const tooltipAbsoluteTimeRef = useRef<HTMLSpanElement>(null)
-  const currentPlayTimeRef = useRef(0)
+  const tooltipBucketCountRef = useRef<HTMLSpanElement>(null)
+  const currentPlayTimeRef = useRef(Number(getPlaybackElapsedNs()) / 1e9)
 
   const [timelineData, setTimelineData] = useState<TimelineTopicData[] | null>(null)
   const [loadingData, setLoadingData] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  currentPlayTimeRef.current = Number(elapsedNs) / 1e9
 
   const visibleTimelineData = useMemo(() => {
     if (!timelineData || config.visibleTopics === null) {
@@ -172,8 +152,16 @@ export default function TimelinePanel({
   }, [fileSummary])
 
   useEffect(() => {
-    chartRef.current?.redraw()
-  }, [elapsedNs])
+    const redraw = () => chartRef.current?.redraw()
+    const unsubscribe = subscribePlaybackTime((elapsedNs) => {
+      currentPlayTimeRef.current = Number(elapsedNs) / 1e9
+      scheduleFrame(redraw)
+    })
+    return () => {
+      unsubscribe()
+      cancelFrame(redraw)
+    }
+  }, [])
 
   const durationSeconds = Math.max(Number(fileSummary?.durationNs ?? 0) / 1e9, 0.000_001)
   const topicCount = visibleTimelineData.length
@@ -230,24 +218,19 @@ export default function TimelinePanel({
           ctx.globalAlpha = 0.78
           for (let topicIndex = 0; topicIndex < topicCount; topicIndex++) {
             ctx.fillStyle = topicColors[topicIndex]
-            const times = visibleTimelineData[topicIndex].times
-            const [startIndex, endIndex] = findVisibleTimestampRange(times, minTimeNs, maxTimeNs)
+            const topicData = visibleTimelineData[topicIndex]
+            const [startIndex, endIndex] = findVisibleTimelineBucketRange(topicData, minTimeNs, maxTimeNs)
             const y = Math.round(u.valToPos(topicIndex, 'y', true))
-            let lastPixelX = Number.NaN
 
-            for (let messageIndex = startIndex; messageIndex < endIndex; messageIndex++) {
-              const relativeSeconds = Number(times[messageIndex]) / 1e9
-              const x = Math.round(u.valToPos(relativeSeconds, 'x', true))
-              if (x === lastPixelX) {
-                continue
-              }
-              lastPixelX = x
-              ctx.fillRect(
-                x - Math.floor(POINT_SIZE / 2),
-                y - Math.floor(POINT_SIZE / 2),
-                POINT_SIZE,
-                POINT_SIZE,
-              )
+            for (let bucketIndex = startIndex; bucketIndex < endIndex; bucketIndex++) {
+              const startSeconds = Number(topicData.bucketStartTimes[bucketIndex]) / 1e9
+              const endSeconds = Number(topicData.bucketEndTimes[bucketIndex]) / 1e9
+              const startX = Math.round(u.valToPos(startSeconds, 'x', true))
+              const endX = Math.round(u.valToPos(endSeconds, 'x', true))
+              const width = Math.max(POINT_SIZE, endX - startX + 1)
+              const density = Math.log2(topicData.bucketCounts[bucketIndex] + 1)
+              ctx.globalAlpha = Math.min(0.45 + density * 0.06, 0.92)
+              ctx.fillRect(startX - Math.floor(POINT_SIZE / 2), y - 1, width, 3)
             }
           }
 
@@ -284,16 +267,26 @@ export default function TimelinePanel({
 
           const topicIndex = Math.round(u.posToVal(top, 'y'))
           const topicData = visibleTimelineData[topicIndex]
-          if (!topicData || topicData.times.length === 0) {
+          if (!topicData || topicData.bucketStartTimes.length === 0) {
             hideTooltip()
             return
           }
 
           const targetTimeNs = secondsToNanoseconds(u.posToVal(left, 'x'), 'round')
-          const messageIndex = findNearestTimestampIndex(topicData.times, targetTimeNs)
-          const relativeTimeNs = topicData.times[messageIndex]
-          const messageLeft = u.valToPos(Number(relativeTimeNs) / 1e9, 'x')
-          if (Math.abs(messageLeft - left) > TOOLTIP_DISTANCE_PX) {
+          const nearest = findNearestTimelineTimestamp(topicData, targetTimeNs)
+          if (!nearest) {
+            hideTooltip()
+            return
+          }
+          const relativeTimeNs = nearest.timeNs
+          const bucketStartLeft = u.valToPos(Number(topicData.bucketStartTimes[nearest.bucketIndex]) / 1e9, 'x')
+          const bucketEndLeft = u.valToPos(Number(topicData.bucketEndTimes[nearest.bucketIndex]) / 1e9, 'x')
+          const minBucketLeft = Math.min(bucketStartLeft, bucketEndLeft)
+          const maxBucketLeft = Math.max(bucketStartLeft, bucketEndLeft)
+          const distanceToBucket = left < minBucketLeft
+            ? minBucketLeft - left
+            : left > maxBucketLeft ? left - maxBucketLeft : 0
+          if (distanceToBucket > TOOLTIP_DISTANCE_PX) {
             hideTooltip()
             return
           }
@@ -308,6 +301,9 @@ export default function TimelinePanel({
             tooltipAbsoluteTimeRef.current.textContent = formatNanoseconds(
               fileSummary.startNs + relativeTimeNs,
             )
+          }
+          if (tooltipBucketCountRef.current) {
+            tooltipBucketCountRef.current.textContent = topicData.bucketCounts[nearest.bucketIndex].toLocaleString()
           }
 
           const offset = 12
@@ -470,6 +466,10 @@ export default function TimelinePanel({
                       <div className="flex items-center justify-between gap-4">
                         <span className="text-muted-foreground">Log time</span>
                         <span ref={tooltipAbsoluteTimeRef} />
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <span className="text-muted-foreground">Messages in bucket</span>
+                        <span ref={tooltipBucketCountRef} />
                       </div>
                     </div>
                   </div>

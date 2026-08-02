@@ -434,12 +434,3 @@ export function renderPreparedPointCloud(
     hasIntensity: sampled.hasIntensity,
   }
 }
-
-export function parsePointCloud(
-  payload: unknown,
-  options: PointCloudParseOptions,
-  output?: PointCloudOutputBuffers,
-): PointCloudData | null {
-  const prepared = preparePointCloud(payload, options.maxPoints)
-  return prepared ? renderPreparedPointCloud(prepared, options, output) : null
-}

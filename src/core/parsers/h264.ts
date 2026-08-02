@@ -88,8 +88,7 @@ export function checkH264IsKeyframe(data: Uint8Array): boolean {
 
 export function processH264Frame(data: Uint8Array): H264ParseResult {
   const bytes = ensureAnnexB(data)
-  let _hasSps = false
-  let _hasPps = false
+  let hasSps = false
   let hasIdr = false
 
   const spsPpsChunks: Uint8Array[] = []
@@ -116,11 +115,10 @@ export function processH264Frame(data: Uint8Array): H264ParseResult {
       }
 
       if (nalType === 7) {
-        _hasSps = true
+        hasSps = true
         spsPpsChunks.push(bytes.subarray(pos, nextPos))
       }
       else if (nalType === 8) {
-        _hasPps = true
         spsPpsChunks.push(bytes.subarray(pos, nextPos))
       }
       else if (nalType === 5) {
@@ -147,7 +145,7 @@ export function processH264Frame(data: Uint8Array): H264ParseResult {
 
   return {
     bytes,
-    isKeyframe: hasIdr || _hasSps,
+    isKeyframe: hasIdr || hasSps,
     spsPps,
   }
 }

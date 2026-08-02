@@ -1,5 +1,9 @@
+import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { TimelineTopicData } from '@/core/workers/timeline-data'
 import { wrap } from 'comlink'
+import { resetDatasetResources } from '@/core/dataset-resource-registry'
+import { PlaybackBatchAccumulator } from '@/core/playback-batch-accumulator'
+import { setPlaybackElapsedNs } from '@/core/playback-time-store'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
 import { PlaybackClock } from './playback-clock'
@@ -9,6 +13,12 @@ interface PendingSeekBackfill {
   timeNs: bigint
 }
 
+interface PlaybackMessageBatch {
+  messages: any[]
+  readThroughTimeNs: bigint
+  hasMore: boolean
+}
+
 export class PlaybackController {
   private worker: any = null
   private clock: PlaybackClock | null = null
@@ -16,13 +26,17 @@ export class PlaybackController {
   private lastTickTimeNs: bigint = 0n
   private fileSummary: any = null
   private isQuerying = false
+  private pendingQueryEndTimeNs: bigint | null = null
   private queryVersion = 0
   private pendingBackfillPanelIds = new Set<string>()
   private backfillScheduled = false
   private seekGeneration = 0
   private pendingSeekBackfill: PendingSeekBackfill | null = null
   private isSeekBackfillRunning = false
+  private resumeAfterSeek = false
+  private playbackBatchAccumulator = new PlaybackBatchAccumulator<any>()
   private timelineDataPromise: Promise<TimelineTopicData[]> | null = null
+  private nextPlotRequestId = 0
 
   constructor() {
     globalMessagePipeline.onSubscriptionsChanged((panelId) => {
@@ -48,7 +62,7 @@ export class PlaybackController {
     const plan = globalMessagePipeline.getQueryPlan()
     const worker = this.getWorker()
     if (plan.topics.length > 0 && worker) {
-      this.queryVersion++
+      this.invalidatePlaybackQuery()
       const version = this.queryVersion
       const isTargetedBackfill = Boolean(panelIds?.length)
       worker.getBackfillMessages(
@@ -87,6 +101,12 @@ export class PlaybackController {
 
   async loadFile(file: File) {
     this.pause()
+    this.pendingSeekBackfill = null
+    this.seekGeneration++
+    this.invalidatePlaybackQuery()
+    resetDatasetResources()
+    setPlaybackElapsedNs(0n)
+    this.pendingQueryEndTimeNs = null
     this.timelineDataPromise = null
     const worker = this.getWorker()
     const summary = await worker.initialize(file)
@@ -97,6 +117,21 @@ export class PlaybackController {
     // update Zustand store
     const store = usePlayerStore.getState()
     store.setFileSummary(summary)
+  }
+
+  closeFile() {
+    this.pause()
+    this.pendingSeekBackfill = null
+    this.seekGeneration++
+    this.fileSummary = null
+    this.clock = null
+    this.lastTickTimeNs = 0n
+    this.pendingQueryEndTimeNs = null
+    this.timelineDataPromise = null
+    this.invalidatePlaybackQuery()
+    resetDatasetResources()
+    setPlaybackElapsedNs(0n)
+    usePlayerStore.getState().setFileSummary(null)
   }
 
   play() {
@@ -110,6 +145,17 @@ export class PlaybackController {
       this.seek(this.fileSummary.startNs)
     }
 
+    if (
+      this.isSeekBackfillRunning
+      || this.pendingSeekBackfill
+      || (this.resumeAfterSeek && this.isQuerying)
+    ) {
+      this.resumeAfterSeek = true
+      usePlayerStore.getState().setIsPlaying(true)
+      return
+    }
+
+    this.resumeAfterSeek = false
     this.clock.play()
     this.lastTickTimeNs = this.clock.get()
     usePlayerStore.getState().setIsPlaying(true)
@@ -117,10 +163,10 @@ export class PlaybackController {
   }
 
   pause() {
-    if (!this.clock || !this.clock.getIsPlaying()) {
-      return
+    this.resumeAfterSeek = false
+    if (this.clock?.getIsPlaying()) {
+      this.clock.pause()
     }
-    this.clock.pause()
     usePlayerStore.getState().setIsPlaying(false)
     this.stopLoop()
   }
@@ -129,10 +175,17 @@ export class PlaybackController {
     if (!this.clock || !this.fileSummary) {
       return
     }
-    this.queryVersion++
+    const shouldResume = this.clock.getIsPlaying() || this.resumeAfterSeek
+    if (this.clock.getIsPlaying()) {
+      this.clock.pause()
+      this.stopLoop()
+    }
+    this.resumeAfterSeek = shouldResume
+    this.invalidatePlaybackQuery()
     this.clock.seek(ns)
     this.lastTickTimeNs = ns
-    usePlayerStore.getState().setElapsedNs(ns - this.fileSummary.startNs)
+    this.pendingQueryEndTimeNs = null
+    setPlaybackElapsedNs(ns - this.fileSummary.startNs)
 
     // Notify visible panel instances before their targeted backfill arrives.
     globalMessagePipeline.emitSeek(ns)
@@ -173,30 +226,44 @@ export class PlaybackController {
         return
       }
 
-      usePlayerStore.getState().setElapsedNs(current - this.fileSummary.startNs)
+      setPlaybackElapsedNs(current - this.fileSummary.startNs)
 
       const seekBackfillPending = this.isSeekBackfillRunning || this.pendingSeekBackfill !== null
       const plan = globalMessagePipeline.getQueryPlan()
       const worker = this.getWorker()
-      if (!seekBackfillPending && plan.topics.length > 0 && current > start && worker) {
+      const hasPendingQueryBatch = this.pendingQueryEndTimeNs !== null
+      if (!seekBackfillPending && plan.topics.length > 0 && (hasPendingQueryBatch || current > start) && worker) {
         if (!this.isQuerying) {
           this.isQuerying = true
-          const queryEnd = current
+          const queryEnd = this.pendingQueryEndTimeNs ?? current
           const version = this.queryVersion
           worker.getMessages(start, queryEnd, plan.topics, plan.modeByTopic, plan.processorsByTopic)
-            .then((messages: any[]) => {
+            .then((batch: PlaybackMessageBatch) => {
               if (version !== this.queryVersion) {
                 return
               }
-              this.lastTickTimeNs = queryEnd
+              this.lastTickTimeNs = batch.readThroughTimeNs
+              this.pendingQueryEndTimeNs = batch.hasMore ? queryEnd : null
 
-              globalMessagePipeline.dispatch(messages)
+              const messages = this.playbackBatchAccumulator.consume(
+                batch.messages,
+                plan.modeByTopic,
+                !batch.hasMore,
+              )
+              if (messages.length > 0) {
+                globalMessagePipeline.dispatch(messages)
+              }
             })
             .catch((err: any) => {
+              if (version === this.queryVersion) {
+                this.playbackBatchAccumulator.clear()
+                this.pendingQueryEndTimeNs = null
+              }
               console.error('Error fetching messages in play loop:', err)
             })
             .finally(() => {
               this.isQuerying = false
+              this.resumePlaybackAfterSeekIfReady()
             })
         }
       }
@@ -258,13 +325,32 @@ export class PlaybackController {
         catch (error) {
           if (request.generation === this.seekGeneration) {
             console.error('Error fetching messages after seek:', error)
+            globalMessagePipeline.emitSeekComplete(request.timeNs)
           }
         }
       }
     }
     finally {
       this.isSeekBackfillRunning = false
+      this.resumePlaybackAfterSeekIfReady()
     }
+  }
+
+  private resumePlaybackAfterSeekIfReady() {
+    if (
+      this.resumeAfterSeek
+      && !this.isSeekBackfillRunning
+      && !this.pendingSeekBackfill
+      && !this.isQuerying
+    ) {
+      this.play()
+    }
+  }
+
+  private invalidatePlaybackQuery() {
+    this.queryVersion++
+    this.pendingQueryEndTimeNs = null
+    this.playbackBatchAccumulator.clear()
   }
 
   private stopLoop() {
@@ -282,12 +368,34 @@ export class PlaybackController {
     return worker.getFirstMessagePayload(topic)
   }
 
-  async getTopicFieldValues(topic: string, path: string, startNs: bigint) {
+  async getImageTopicDeliveryMode(topic: string): Promise<'all' | 'latest'> {
     const worker = this.getWorker()
     if (!worker) {
-      return { times: [], values: [] }
+      return 'latest'
     }
-    return worker.getTopicFieldValues(topic, path, startNs)
+    return worker.getImageTopicDeliveryMode(topic)
+  }
+
+  getPlotSeriesData(
+    requests: PlotSeriesRequest[],
+    startTimeNs: bigint,
+    endTimeNs: bigint,
+  ): { requestId: number, promise: Promise<PlotSeriesData[]> } {
+    const requestId = ++this.nextPlotRequestId
+    const worker = this.getWorker()
+    if (!worker) {
+      return { requestId, promise: Promise.resolve([]) }
+    }
+    return {
+      requestId,
+      promise: worker.getPlotSeriesData(requestId, requests, startTimeNs, endTimeNs),
+    }
+  }
+
+  cancelPlotSeriesData(requestId: number) {
+    this.getWorker()?.cancelPlotSeriesData(requestId).catch((error: unknown) => {
+      console.warn('Failed to cancel plot data request:', error)
+    })
   }
 
   getMessageTimelineData(): Promise<TimelineTopicData[]> {
@@ -303,7 +411,10 @@ export class PlaybackController {
       return Promise.resolve([])
     }
 
-    const request = worker.getMessageTimelineData(this.fileSummary.startNs) as Promise<TimelineTopicData[]>
+    const request = worker.getMessageTimelineData(
+      this.fileSummary.startNs,
+      this.fileSummary.endNs,
+    ) as Promise<TimelineTopicData[]>
     this.timelineDataPromise = request
     request.catch(() => {
       if (this.timelineDataPromise === request) {

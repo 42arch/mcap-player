@@ -1,37 +1,44 @@
 import { describe, expect, it } from 'vitest'
-import { getNumericFields, getValueByPath } from './value-extractor'
+import { createNumericValueAccessor, getNumericFields } from './value-extractor'
 
-describe('getValueByPath', () => {
+describe('createNumericValueAccessor', () => {
   it('should extract a top level number', () => {
     const obj = { x: 42 }
-    expect(getValueByPath(obj, 'x')).toBe(42)
+    expect(createNumericValueAccessor('x')(obj)).toBe(42)
   })
 
   it('should extract nested properties', () => {
     const obj = { a: { b: { c: 1.5 } } }
-    expect(getValueByPath(obj, 'a.b.c')).toBe(1.5)
+    expect(createNumericValueAccessor('a.b.c')(obj)).toBe(1.5)
   })
 
   it('should extract array values', () => {
     const obj = { arr: [10, 20, 30] }
-    expect(getValueByPath(obj, 'arr[1]')).toBe(20)
-    expect(getValueByPath(obj, 'arr.2')).toBe(30)
+    expect(createNumericValueAccessor('arr[1]')(obj)).toBe(20)
+    expect(createNumericValueAccessor('arr.2')(obj)).toBe(30)
   })
 
   it('should return null for missing paths', () => {
     const obj = { a: { b: 1 } }
-    expect(getValueByPath(obj, 'a.c')).toBeNull()
-    expect(getValueByPath(obj, 'missing')).toBeNull()
+    expect(createNumericValueAccessor('a.c')(obj)).toBeNull()
+    expect(createNumericValueAccessor('missing')(obj)).toBeNull()
   })
 
   it('should return null for non-numeric values', () => {
     const obj = { val: 'hello' }
-    expect(getValueByPath(obj, 'val')).toBeNull()
+    expect(createNumericValueAccessor('val')(obj)).toBeNull()
   })
 
   it('should return null for null/undefined objects', () => {
-    expect(getValueByPath(null, 'a')).toBeNull()
-    expect(getValueByPath(undefined, 'a')).toBeNull()
+    expect(createNumericValueAccessor('a')(null)).toBeNull()
+    expect(createNumericValueAccessor('a')(undefined)).toBeNull()
+  })
+
+  it('reuses a compiled nested path', () => {
+    const readPositionX = createNumericValueAccessor('pose.position.x')
+
+    expect(readPositionX({ pose: { position: { x: 1.5 } } })).toBe(1.5)
+    expect(readPositionX({ pose: { position: { x: 2.5 } } })).toBe(2.5)
   })
 })
 

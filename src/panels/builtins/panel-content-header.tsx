@@ -22,5 +22,3 @@ export function PanelContentHeader({
     </div>
   )
 }
-
-export const PanelToolbar = PanelContentHeader

@@ -1,9 +1,9 @@
 import type { McapIndexedReader } from '@mcap/core'
+import type { MessageProcessor, MessageProcessorByTopic } from '@/core/message-processing'
 import { parse } from '@foxglove/rosmsg'
 import { MessageReader as Ros2Reader } from '@foxglove/rosmsg2-serialization'
 import { MessageReader as Ros1Reader } from '@foxglove/rosmsg-serialization'
 import protobuf from 'protobufjs'
-import type { MessageProcessor, MessageProcessorByTopic } from '@/core/message-processing'
 import { checkH264IsKeyframe, isH264Format } from '@/core/parsers/h264'
 import { preparePointCloud } from '@/core/parsers/point-cloud-parser'
 import { SceneUpdateState } from '@/core/parsers/scene-update-parser'
@@ -24,17 +24,30 @@ export interface DecodedMessage {
 export type DispatchMode = 'latest' | 'all'
 export type DispatchModeByTopic = Record<string, DispatchMode>
 
-export function isSlowBackfillChannel(topic: string, schemaName: string): boolean {
+export interface MessageBatchResult {
+  messages: DecodedMessage[]
+  /** The next request must start here. The cursor preserves messages sharing this timestamp. */
+  readThroughTimeNs: bigint
+  /** True when the requested time range was stopped by a batch limit. */
+  hasMore: boolean
+}
+
+export function isTransformBackfillChannel(topic: string, schemaName: string): boolean {
   const normalizedTopic = topic.toLowerCase()
   const normalizedSchema = schemaName.toLowerCase()
   return normalizedTopic === '/tf'
     || normalizedTopic === '/tf_static'
-    || normalizedSchema.includes('sceneupdate')
-    || normalizedSchema.includes('scene_update')
     || normalizedSchema.includes('frametransform')
     || normalizedSchema.includes('frame_transform')
     || normalizedSchema.includes('tfmessage')
     || normalizedSchema.includes('tf_message')
+}
+
+export function isSlowBackfillChannel(topic: string, schemaName: string): boolean {
+  const normalizedSchema = schemaName.toLowerCase()
+  return isTransformBackfillChannel(topic, schemaName)
+    || normalizedSchema.includes('sceneupdate')
+    || normalizedSchema.includes('scene_update')
     || normalizedSchema.includes('compressedimage')
     || normalizedSchema.includes('compressed_image')
     || normalizedSchema.includes('compressedvideo')
@@ -65,9 +78,14 @@ interface BackfillCheckpoint<T> {
 }
 
 const STATE_CHECKPOINT_INTERVAL_NS = 30_000_000_000n
+const TRANSFORM_CHECKPOINT_INTERVAL_NS = 10_000_000_000n
 const MAX_STATE_CHECKPOINTS_PER_TOPIC = 64
+const MAX_TRANSFORM_CHECKPOINTS_PER_TOPIC = 512
 const MAX_READ_AHEAD_MESSAGES = 64
 const MAX_READ_AHEAD_BYTES = 8 * 1024 * 1024
+const MAX_BATCH_MESSAGES = 256
+const MAX_BATCH_BYTES = 8 * 1024 * 1024
+const MAX_BATCH_WALL_MS = 6
 
 function getSingleTransformChildFrame(payload: any): string {
   const value = payload?.child_frame_id || payload?.childFrameId
@@ -166,49 +184,6 @@ export function getTransferableBuffers(messages: readonly DecodedMessage[]): Arr
   return Array.from(buffers)
 }
 
-export function selectLatestMessages<T>(
-  messages: readonly T[],
-  getTopic: (message: T) => string | undefined,
-): T[] {
-  const latestByTopic = new Map<string, T>()
-  for (const message of messages) {
-    const topic = getTopic(message)
-    if (topic) {
-      latestByTopic.set(topic, message)
-    }
-  }
-  return Array.from(latestByTopic.values())
-}
-
-/**
- * Point clouds can keep only their latest sample, but stateful spatial messages
- * (for example SceneUpdate and TF) must be applied in order.
- */
-export function selectLatestWithSceneUpdates<T>(
-  messages: readonly T[],
-  getTopic: (message: T) => string | undefined,
-  isSceneUpdate: (message: T) => boolean,
-): T[] {
-  const latestByTopic = new Map<string, T>()
-  for (const message of messages) {
-    if (isSceneUpdate(message)) {
-      continue
-    }
-    const topic = getTopic(message)
-    if (topic) {
-      latestByTopic.set(topic, message)
-    }
-  }
-
-  return messages.filter((message) => {
-    if (isSceneUpdate(message)) {
-      return true
-    }
-    const topic = getTopic(message)
-    return topic !== undefined && latestByTopic.get(topic) === message
-  })
-}
-
 export function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw' = 'placeholder'): any {
   if (value === null || value === undefined) {
     return value
@@ -286,6 +261,7 @@ export class MessageCursor {
   private isPumping = false
   private hasEnded = false
   private cursorGeneration = 0
+  private queueWaiters = new Set<() => void>()
 
   // Configuration
   private topics: string[] = []
@@ -308,11 +284,18 @@ export class MessageCursor {
 
   clear() {
     this.cursorGeneration++
+    const iterator = this.iterator
     this.queue = []
     this.totalBytes = 0
     this.iterator = null
     this.isPumping = false
     this.hasEnded = false
+    this.notifyQueueWaiters()
+    if (typeof iterator?.return === 'function') {
+      void Promise.resolve(iterator.return()).catch((error: unknown) => {
+        console.warn('Failed to close MCAP message iterator:', error)
+      })
+    }
   }
 
   reset(startTimeNs: bigint, topics: string[], binaryFormat: 'placeholder' | 'hex' | 'raw') {
@@ -355,10 +338,12 @@ export class MessageCursor {
         }
         if (next.done) {
           this.hasEnded = true
+          this.notifyQueueWaiters()
           break
         }
 
         this.enqueue(next.value)
+        this.notifyQueueWaiters()
       }
     }
     catch (err) {
@@ -367,6 +352,7 @@ export class MessageCursor {
       }
       console.error('Error pumping message in worker cursor:', err)
       this.hasEnded = true
+      this.notifyQueueWaiters()
     }
     finally {
       if (generation === this.cursorGeneration) {
@@ -491,45 +477,77 @@ export class MessageCursor {
     endTimeNs: bigint,
     dispatchModes: DispatchModeByTopic,
     processorsByTopic: MessageProcessorByTopic = {},
-  ): Promise<DecodedMessage[]> {
-    // If the pump hasn't read up to endTimeNs yet, and we haven't hit the end of the file,
-    // block and pump synchronously until we reach endTimeNs or the file ends.
-    while (
-      !this.hasEnded
-      && this.iterator
-      && (this.queue.length === 0 || this.queue[this.queue.length - 1].message.logTime < endTimeNs)
-    ) {
-      const next = await this.iterator.next()
-      if (next.done) {
-        this.hasEnded = true
-        break
-      }
-      this.enqueue(next.value)
-    }
-
-    // Extract raw messages first. For visual panels, collapse each topic before
-    // deserializing it or crossing the Worker boundary.
+  ): Promise<MessageBatchResult> {
+    const generation = this.cursorGeneration
+    const batchStart = performance.now()
     const ready: BufferedMessage[] = []
-    let i = 0
-    while (i < this.queue.length) {
-      if (this.queue[i].message.logTime <= endTimeNs) {
-        ready.push(this.queue[i])
-        this.totalBytes -= this.queue[i].dataLength
-        i++
+    let readyBytes = 0
+    let hitBatchLimit = false
+
+    while (generation === this.cursorGeneration) {
+      const next = this.queue[0]
+      if (!next) {
+        if (this.hasEnded || !this.iterator) {
+          break
+        }
+        if (ready.length > 0) {
+          hitBatchLimit = true
+          break
+        }
+        void this.pump(generation).catch(err => console.error('Error replenishing background buffer:', err))
+        await this.waitForQueue(generation)
+        continue
       }
-      else {
+
+      if (next.message.logTime > endTimeNs) {
         break
       }
+
+      const wouldExceedBytes = ready.length > 0 && readyBytes + next.dataLength > MAX_BATCH_BYTES
+      const wallTimeExceeded = ready.length > 0 && performance.now() - batchStart >= MAX_BATCH_WALL_MS
+      if (ready.length >= MAX_BATCH_MESSAGES || wouldExceedBytes || wallTimeExceeded) {
+        hitBatchLimit = true
+        break
+      }
+
+      this.queue.shift()
+      this.totalBytes = Math.max(0, this.totalBytes - next.dataLength)
+      ready.push(next)
+      readyBytes += next.dataLength
     }
 
-    if (i > 0) {
-      this.queue = this.queue.slice(i)
+    void this.pump(generation).catch(err => console.error('Error replenishing background buffer:', err))
+
+    const messages = this.decodeReadyMessages(ready, dispatchModes, processorsByTopic)
+    const lastReadyTimeNs = ready.at(-1)?.message.logTime as bigint | undefined
+
+    return {
+      messages,
+      readThroughTimeNs: hitBatchLimit && lastReadyTimeNs !== undefined
+        ? lastReadyTimeNs
+        : endTimeNs,
+      hasMore: hitBatchLimit,
     }
+  }
 
-    // Re-trigger background pump asynchronously to top up the buffer
-    this.pump().catch(err => console.error('Error replenishing background buffer:', err))
+  private waitForQueue(generation: number): Promise<void> {
+    if (
+      generation !== this.cursorGeneration
+      || this.queue.length > 0
+      || this.hasEnded
+      || !this.iterator
+    ) {
+      return Promise.resolve()
+    }
+    return new Promise<void>((resolve) => {
+      this.queueWaiters.add(resolve)
+    })
+  }
 
-    return this.decodeReadyMessages(ready, dispatchModes, processorsByTopic)
+  private notifyQueueWaiters() {
+    const waiters = Array.from(this.queueWaiters)
+    this.queueWaiters.clear()
+    waiters.forEach(resolve => resolve())
   }
 
   private enqueue(message: any) {
@@ -642,6 +660,7 @@ export class MessageCursor {
     cache: Map<string, BackfillCheckpoint<T>[]>,
     topic: string,
     checkpoint: Omit<BackfillCheckpoint<T>, 'lastUsed'>,
+    maxCheckpoints = MAX_STATE_CHECKPOINTS_PER_TOPIC,
   ): void {
     let checkpoints = cache.get(topic)
     if (!checkpoints) {
@@ -655,7 +674,7 @@ export class MessageCursor {
       return
     }
     checkpoints.push(next)
-    if (checkpoints.length <= MAX_STATE_CHECKPOINTS_PER_TOPIC) {
+    if (checkpoints.length <= maxCheckpoints) {
       return
     }
     let leastRecentlyUsedIndex = 0
@@ -733,62 +752,109 @@ export class MessageCursor {
     }]
   }
 
-  private async getTransformBackfillSnapshot(
-    topic: string,
+  private async getTransformBackfillSnapshots(
+    topics: readonly string[],
     seekTimeNs: bigint,
     isCanceled: () => boolean,
   ): Promise<DecodedMessage[]> {
-    if (!this.reader) {
+    if (!this.reader || topics.length === 0) {
       return []
     }
-    const checkpoint = this.findCheckpoint(this.transformCheckpoints, topic, seekTimeNs)
-    const state = checkpoint?.state.clone() || new TransformUpdateState()
-    let lastMessage = checkpoint?.lastMessage
-    let lastCheckpointTimeNs = checkpoint?.timeNs
+
+    const uniqueTopics = Array.from(new Set(topics))
+    const topicStates = new Map(uniqueTopics.map((topic) => {
+      const checkpoint = this.findCheckpoint(this.transformCheckpoints, topic, seekTimeNs)
+      return [topic, {
+        checkpoint,
+        state: checkpoint?.state.clone() || new TransformUpdateState(),
+        lastMessage: checkpoint?.lastMessage,
+        lastCheckpointTimeNs: checkpoint?.timeNs,
+      }]
+    }))
+    const checkpointResumeTimes = Array.from(topicStates.values())
+      .map(({ checkpoint }) => checkpoint?.resumeTimeNs)
+    const canShareCheckpointStart = checkpointResumeTimes.every(
+      (resumeTimeNs): resumeTimeNs is bigint => resumeTimeNs !== undefined,
+    )
+    const sharedStartTimeNs = canShareCheckpointStart
+      ? checkpointResumeTimes.reduce((earliest, current) => current < earliest ? current : earliest)
+      : undefined
+
+    // TF topics are generally interleaved in the same MCAP chunks. Reading all
+    // of them through one iterator avoids decompressing those chunks once per
+    // topic, which is especially costly during the first seek.
     const iterator = this.reader.readMessages({
-      ...(checkpoint ? { startTime: checkpoint.resumeTimeNs } : {}),
+      ...(sharedStartTimeNs !== undefined ? { startTime: sharedStartTimeNs } : {}),
       endTime: seekTimeNs + 1n,
-      topics: [topic],
+      topics: uniqueTopics,
     })
 
     for await (const rawMessage of iterator) {
       if (isCanceled()) {
         return []
       }
+      const topic = this.reader.channelsById.get(rawMessage.channelId)?.topic
+      const topicState = topic ? topicStates.get(topic) : undefined
+      if (!topic || !topicState) {
+        continue
+      }
+      if (topicState.checkpoint && rawMessage.logTime < topicState.checkpoint.resumeTimeNs) {
+        continue
+      }
       const decoded = this.decodeMessage(rawMessage)
       if (!decoded) {
         continue
       }
       if (
-        lastMessage
-        && lastCheckpointTimeNs !== undefined
-        && decoded.logTime > lastMessage.logTime
-        && decoded.logTime - lastCheckpointTimeNs >= STATE_CHECKPOINT_INTERVAL_NS
+        topicState.lastMessage
+        && topicState.lastCheckpointTimeNs !== undefined
+        && decoded.logTime > topicState.lastMessage.logTime
+        && decoded.logTime - topicState.lastCheckpointTimeNs >= TRANSFORM_CHECKPOINT_INTERVAL_NS
       ) {
         const boundaryTimeNs = decoded.logTime > 0n ? decoded.logTime - 1n : 0n
         this.storeCheckpoint(this.transformCheckpoints, topic, {
           timeNs: boundaryTimeNs,
           resumeTimeNs: decoded.logTime,
-          state: state.clone(),
-          lastMessage,
-        })
-        lastCheckpointTimeNs = boundaryTimeNs
+          state: topicState.state.clone(),
+          lastMessage: topicState.lastMessage,
+        }, MAX_TRANSFORM_CHECKPOINTS_PER_TOPIC)
+        topicState.lastCheckpointTimeNs = boundaryTimeNs
       }
-      state.apply(decoded.payload)
-      lastMessage = decoded
-      lastCheckpointTimeNs ??= decoded.logTime
+      topicState.state.apply(decoded.payload)
+      topicState.lastMessage = decoded
+      topicState.lastCheckpointTimeNs ??= decoded.logTime
     }
 
-    if (!lastMessage || isCanceled()) {
+    if (isCanceled()) {
       return []
     }
-    this.storeCheckpoint(this.transformCheckpoints, topic, {
-      timeNs: seekTimeNs,
-      resumeTimeNs: seekTimeNs + 1n,
-      state: state.clone(),
-      lastMessage,
-    })
-    return state.toSnapshotMessages(lastMessage, seekTimeNs)
+
+    const messages: DecodedMessage[] = []
+    for (const topic of uniqueTopics) {
+      const topicState = topicStates.get(topic)!
+      if (!topicState.lastMessage) {
+        continue
+      }
+      this.storeCheckpoint(this.transformCheckpoints, topic, {
+        timeNs: seekTimeNs,
+        resumeTimeNs: seekTimeNs + 1n,
+        state: topicState.state.clone(),
+        lastMessage: topicState.lastMessage,
+      }, MAX_TRANSFORM_CHECKPOINTS_PER_TOPIC)
+      messages.push(...topicState.state.toSnapshotMessages(topicState.lastMessage, seekTimeNs))
+    }
+    return messages
+  }
+
+  async prewarmTransformCheckpoints(
+    topics: readonly string[],
+    endTimeNs: bigint,
+    isCanceled: () => boolean = () => false,
+  ): Promise<void> {
+    if (!this.reader || topics.length === 0 || isCanceled()) {
+      return
+    }
+    await this.getTransformBackfillSnapshots(topics, endTimeNs, isCanceled)
   }
 
   async getBackfillMessages(
@@ -818,12 +884,13 @@ export class MessageCursor {
       }
     }
 
-    const transformMessages: DecodedMessage[] = []
-    for (const topic of transformTopics) {
-      transformMessages.push(...await this.getTransformBackfillSnapshot(topic, seekTimeNs, isCanceled))
-      if (isCanceled()) {
-        return []
-      }
+    const transformMessages = await this.getTransformBackfillSnapshots(
+      transformTopics,
+      seekTimeNs,
+      isCanceled,
+    )
+    if (isCanceled()) {
+      return []
     }
     if (transformMessages.length > 0) {
       transformMessages[0].transformSnapshot = true

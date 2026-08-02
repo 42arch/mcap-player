@@ -1,15 +1,27 @@
 import type { DispatchModeByTopic } from './message-cursor'
+import type { PlotSeriesData, PlotSeriesRequest } from './plot-data'
 import type { MessageProcessorByTopic } from '@/core/message-processing'
 import { Buffer } from 'buffer/'
 import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'
 import { expose, transfer } from 'comlink'
-import { getValueByPath } from '@/core/parsers/value-extractor'
-import { getTransferableBuffers, isSlowBackfillChannel, MessageCursor } from './message-cursor'
+import { isH264Format } from '@/core/parsers/h264'
+import { createNumericValueAccessor } from '@/core/parsers/value-extractor'
+import {
+  getTransferableBuffers,
+  isSlowBackfillChannel,
+  isTransformBackfillChannel,
+  MessageCursor,
+} from './message-cursor'
+import { DEFAULT_MAX_PLOT_POINTS_PER_SERIES, PlotSeriesAccumulator } from './plot-data'
 import { collectTimelineData } from './timeline-data'
 
 type BackfillPhase = 'all' | 'fast' | 'slow'
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, 0))
+}
 
 // @foxglove/wasm-lz4 expects Node's Buffer when copying decompressed bytes.
 // Install the browser implementation only in this worker's global scope.
@@ -28,8 +40,18 @@ class McapWorker {
   private lastDispatchModes = ''
   private lastEndTimeNs = -1n
   private latestSeekGeneration = 0
+  private imageDeliveryModes = new Map<string, 'all' | 'latest'>()
+  private activePlotRequestIds = new Set<number>()
+  private canceledPlotRequestIds = new Set<number>()
+  private timelineGeneration = 0
+  private transformPrewarmGeneration = 0
+  private transformPrewarmTopicsKey = ''
 
   async initialize(file: File) {
+    this.activePlotRequestIds.forEach(requestId => this.canceledPlotRequestIds.add(requestId))
+    this.timelineGeneration++
+    this.transformPrewarmGeneration++
+    this.transformPrewarmTopicsKey = ''
     if (!this.decompressHandlers) {
       this.decompressHandlers = await loadDecompressHandlers()
     }
@@ -46,6 +68,7 @@ class McapWorker {
     this.lastDispatchModes = ''
     this.lastEndTimeNs = -1n
     this.latestSeekGeneration = 0
+    this.imageDeliveryModes.clear()
 
     // Extract schemas
     const schemasList = []
@@ -138,7 +161,7 @@ class McapWorker {
     processorsByTopic: MessageProcessorByTopic = {},
   ) {
     if (!this.reader) {
-      return []
+      return { messages: [], readThroughTimeNs: endTimeNs, hasMore: false }
     }
 
     // Check if subscription plan or sequence continuity has changed.
@@ -153,9 +176,9 @@ class McapWorker {
       this.lastDispatchModes = dispatchModesKey
     }
 
-    this.lastEndTimeNs = endTimeNs
-    const messages = await this.cursor.drainUpTo(endTimeNs, dispatchModes, processorsByTopic)
-    return transfer(messages, getTransferableBuffers(messages))
+    const result = await this.cursor.drainUpTo(endTimeNs, dispatchModes, processorsByTopic)
+    this.lastEndTimeNs = result.readThroughTimeNs
+    return transfer(result, getTransferableBuffers(result.messages))
   }
 
   async getBackfillMessages(
@@ -194,11 +217,49 @@ class McapWorker {
       this.lastDispatchModes = ''
       this.lastEndTimeNs = seekTimeNs
     }
+    if (phase !== 'fast') {
+      this.scheduleTransformPrewarm(selectedTopics)
+    }
     return transfer(messages, getTransferableBuffers(messages))
   }
 
   setSeekGeneration(generation: number) {
-    this.latestSeekGeneration = Math.max(this.latestSeekGeneration, generation)
+    if (generation > this.latestSeekGeneration) {
+      this.latestSeekGeneration = generation
+      this.transformPrewarmGeneration++
+      this.transformPrewarmTopicsKey = ''
+    }
+  }
+
+  private scheduleTransformPrewarm(topics: readonly string[]): void {
+    if (!this.reader) {
+      return
+    }
+    const transformTopics = Array.from(new Set(topics.filter(topic => this.isTransformTopic(topic)))).sort()
+    const endTimeNs = this.reader.statistics?.messageEndTime
+    if (transformTopics.length === 0 || endTimeNs === undefined) {
+      return
+    }
+    const topicsKey = transformTopics.join('\n')
+    if (topicsKey === this.transformPrewarmTopicsKey) {
+      return
+    }
+    this.transformPrewarmTopicsKey = topicsKey
+    const generation = ++this.transformPrewarmGeneration
+    setTimeout(() => {
+      if (generation !== this.transformPrewarmGeneration) {
+        return
+      }
+      void this.cursor.prewarmTransformCheckpoints(
+        transformTopics,
+        endTimeNs,
+        () => generation !== this.transformPrewarmGeneration,
+      ).catch((error: unknown) => {
+        if (generation === this.transformPrewarmGeneration) {
+          console.warn('Failed to prewarm TF seek checkpoints:', error)
+        }
+      })
+    }, 0)
   }
 
   private isSlowBackfillTopic(topic: string): boolean {
@@ -211,6 +272,19 @@ class McapWorker {
       }
       const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
       return isSlowBackfillChannel(topic, schemaName)
+    })
+  }
+
+  private isTransformTopic(topic: string): boolean {
+    if (!this.reader) {
+      return false
+    }
+    return Array.from(this.reader.channelsById.values()).some((channel) => {
+      if (channel.topic !== topic) {
+        return false
+      }
+      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name || ''
+      return isTransformBackfillChannel(topic, schemaName)
     })
   }
 
@@ -241,56 +315,147 @@ class McapWorker {
     }
   }
 
-  async getTopicFieldValues(topic: string, path: string, startNs: bigint) {
+  async getImageTopicDeliveryMode(topic: string): Promise<'all' | 'latest'> {
     if (!this.reader) {
-      return { times: [], values: [] }
+      return 'latest'
+    }
+    const cached = this.imageDeliveryModes.get(topic)
+    if (cached) {
+      return cached
     }
     const channel = Array.from(this.reader.channelsById.values()).find(ch => ch.topic === topic)
     if (!channel) {
-      return { times: [], values: [] }
+      return 'latest'
+    }
+    const iterator = this.reader.readMessages({ topics: [topic] })
+    const next = await iterator.next()
+    if (next.done) {
+      return 'latest'
     }
 
-    const deserialize = this.cursor.getDeserializer(channel.id)
-    const times: number[] = []
-    const values: number[] = []
-
-    const iterator = this.reader.readMessages({
-      topics: [topic],
-    })
-
-    for await (const msg of iterator) {
-      try {
-        const payload = deserialize(msg.data)
-        const val = getValueByPath(payload, path)
-        if (val !== null) {
-          times.push(Number(msg.logTime - startNs) / 1e9)
-          values.push(val)
-        }
-      }
-      catch {
-        // Skip bad packets
-      }
+    let mode: 'all' | 'latest' = 'latest'
+    try {
+      const payload = this.cursor.getDeserializer(next.value.channelId)(next.value.data)
+      mode = isH264Format(payload?.format) ? 'all' : 'latest'
     }
-
-    return { times, values }
+    catch {
+      // A malformed first frame should not force the expensive ordered path.
+    }
+    this.imageDeliveryModes.set(topic, mode)
+    return mode
   }
 
-  async getMessageTimelineData(startTimeNs: bigint) {
+  async getPlotSeriesData(
+    requestId: number,
+    requests: PlotSeriesRequest[],
+    startTimeNs: bigint,
+    endTimeNs: bigint,
+    maxPoints = DEFAULT_MAX_PLOT_POINTS_PER_SERIES,
+  ) {
+    const reader = this.reader
+    if (!reader || requests.length === 0) {
+      return []
+    }
+    this.activePlotRequestIds.add(requestId)
+    this.canceledPlotRequestIds.delete(requestId)
+    const isCanceled = () => this.canceledPlotRequestIds.has(requestId)
+    try {
+      const requestsByTopic = new Map<string, Array<{
+        accumulator: PlotSeriesAccumulator
+        readValue: (payload: any) => number | null
+      }>>()
+      const accumulators: PlotSeriesAccumulator[] = []
+      for (const request of requests) {
+        const accumulator = new PlotSeriesAccumulator(
+          request.id,
+          startTimeNs,
+          endTimeNs,
+          maxPoints,
+        )
+        accumulators.push(accumulator)
+        const topicRequests = requestsByTopic.get(request.topic) ?? []
+        topicRequests.push({
+          accumulator,
+          readValue: createNumericValueAccessor(request.path),
+        })
+        requestsByTopic.set(request.topic, topicRequests)
+      }
+
+      const iterator = reader.readMessages({ topics: Array.from(requestsByTopic.keys()) })
+      let sliceStart = performance.now()
+      let sliceMessages = 0
+      for await (const message of iterator) {
+        if (isCanceled()) {
+          return []
+        }
+        const topic = reader.channelsById.get(message.channelId)?.topic
+        const topicRequests = topic ? requestsByTopic.get(topic) : undefined
+        if (topicRequests) {
+          try {
+            const payload = this.cursor.getDeserializer(message.channelId)(message.data)
+            for (const request of topicRequests) {
+              const value = request.readValue(payload)
+              if (value !== null) {
+                request.accumulator.add(message.logTime, value)
+              }
+            }
+          }
+          catch {
+            // Skip malformed packets and continue streaming the remaining data.
+          }
+        }
+
+        sliceMessages++
+        if (sliceMessages >= 2048 || performance.now() - sliceStart >= 8) {
+          await yieldToEventLoop()
+          sliceStart = performance.now()
+          sliceMessages = 0
+        }
+      }
+
+      if (isCanceled()) {
+        return []
+      }
+      const result: PlotSeriesData[] = accumulators.map(accumulator => accumulator.finish())
+      return transfer(
+        result,
+        result.flatMap(series => [series.times.buffer, series.values.buffer]),
+      )
+    }
+    finally {
+      this.activePlotRequestIds.delete(requestId)
+      this.canceledPlotRequestIds.delete(requestId)
+    }
+  }
+
+  cancelPlotSeriesData(requestId: number) {
+    if (this.activePlotRequestIds.has(requestId)) {
+      this.canceledPlotRequestIds.add(requestId)
+    }
+  }
+
+  async getMessageTimelineData(startTimeNs: bigint, endTimeNs: bigint) {
     const reader = this.reader
     if (!reader) {
       return []
     }
 
+    const generation = this.timelineGeneration
     const timelineData = await collectTimelineData({
       channels: reader.channelsById.values(),
-      channelMessageCounts: reader.statistics?.channelMessageCounts,
       messages: reader.readMessages(),
       startTimeNs,
+      endTimeNs,
+      isCanceled: () => generation !== this.timelineGeneration,
     })
 
     return transfer(
       timelineData,
-      timelineData.map(topic => topic.times.buffer),
+      timelineData.flatMap(topic => [
+        topic.bucketStartTimes.buffer,
+        topic.bucketEndTimes.buffer,
+        topic.bucketCounts.buffer,
+      ]),
     )
   }
 }

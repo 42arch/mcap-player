@@ -1,18 +1,20 @@
 import type UPlot from 'uplot'
 import type { UPlotChartHandle, UPlotChartOptions } from '@/components/common/uplot-chart'
+import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { PanelComponentProps, PlotPanelConfig } from '@/panels/core/types'
 import { Loader2 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import UPlotChart from '@/components/common/uplot-chart'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { getPlaybackElapsedNs, subscribePlaybackTime } from '@/core/playback-time-store'
+import { cancelFrame, scheduleFrame } from '@/core/raf-scheduler'
 import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
-import { usePanelMessages } from '@/panels/runtime/use-panel-messages'
 import { usePlayerStore } from '@/stores/use-player-store'
 import 'uplot/dist/uPlot.min.css'
 
 // Helper function to merge multiple series data sets into one aligned time series
-function mergeTimeSeries(datasets: Array<{ times: number[], values: number[] }>): uPlot.AlignedData {
+function mergeTimeSeries(datasets: Array<Pick<PlotSeriesData, 'times' | 'values'>>): uPlot.AlignedData {
   if (datasets.length === 0) {
     return [[], []]
   }
@@ -20,8 +22,8 @@ function mergeTimeSeries(datasets: Array<{ times: number[], values: number[] }>)
   // 1. Collect all unique time points and sort them
   const allTimes = new Set<number>()
   for (const ds of datasets) {
-    for (const t of ds.times) {
-      allTimes.add(t)
+    for (let index = 0; index < ds.times.length; index++) {
+      allTimes.add(ds.times[index])
     }
   }
   const globalTimes = Array.from(allTimes).sort((a, b) => a - b)
@@ -51,11 +53,10 @@ function mergeTimeSeries(datasets: Array<{ times: number[], values: number[] }>)
   ] as UPlot.AlignedData
 }
 
-export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotPanelConfig>) {
+export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfig>) {
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const plotSeries = config.series
 
-  const elapsedNs = usePlayerStore(state => state.elapsedNs)
   const { resolvedTheme } = useTheme()
 
   const tooltipRef = useRef<HTMLDivElement>(null)
@@ -71,43 +72,42 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
   )
 
   const emptyChartData = useMemo(
-    () => [[], ...activeSeries.map(() => [])] as UPlot.AlignedData,
-    [activeSeries],
+    () => [[], ...Array.from({ length: activeSeries.length }, () => [])] as UPlot.AlignedData,
+    [activeSeries.length],
   )
   const [chartData, setChartData] = useState<UPlot.AlignedData>(emptyChartData)
 
-  const activeSeriesSerialized = JSON.stringify(
-    activeSeries.map(s => ({
-      id: s.id,
-      topic: s.topic,
-      path: s.path,
-      color: s.color,
-      lineStyle: s.lineStyle,
-      lineWidth: s.lineWidth,
+  const dataSeriesKey = JSON.stringify(
+    activeSeries.map(series => ({
+      id: series.id,
+      topic: series.topic,
+      path: series.path,
     })),
   )
-
-  const subscriptions = activeSeries.map(series => ({ topic: series.topic, mode: 'all' as const }))
-  const ignorePlaybackMessage = useCallback(() => {}, [])
-  usePanelMessages({
-    panelId,
-    subscriptionId: 'plot-series',
-    topics: subscriptions,
-    onMessage: ignorePlaybackMessage,
-  })
+  const dataRequests = useMemo<PlotSeriesRequest[]>(
+    () => JSON.parse(dataSeriesKey) as PlotSeriesRequest[],
+    [dataSeriesKey],
+  )
 
   // Keep a reference of the current play time for the uPlot plugin to draw the timeline marker
-  const currentPlayTimeRef = useRef<number>(0)
-  currentPlayTimeRef.current = Number(elapsedNs) / 1e9
+  const currentPlayTimeRef = useRef<number>(Number(getPlaybackElapsedNs()) / 1e9)
 
-  // Redraw the chart when elapsedNs changes to reposition the time marker line
+  // Playback time is transient: update the imperative chart without re-rendering React.
   useEffect(() => {
-    chartRef.current?.redraw()
-  }, [elapsedNs])
+    const redraw = () => chartRef.current?.redraw()
+    const unsubscribe = subscribePlaybackTime((elapsedNs) => {
+      currentPlayTimeRef.current = Number(elapsedNs) / 1e9
+      scheduleFrame(redraw)
+    })
+    return () => {
+      unsubscribe()
+      cancelFrame(redraw)
+    }
+  }, [])
 
-  // Fetch full data for all active series in parallel and merge them
+  // Scan all selected topics once in the worker and return fixed-budget series.
   useEffect(() => {
-    if (activeSeries.length === 0 || !fileSummary) {
+    if (dataRequests.length === 0 || !fileSummary) {
       setChartData(emptyChartData)
       defaultYRangeRef.current = null
       return
@@ -117,20 +117,22 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
     setChartData(emptyChartData)
     setLoadingData(true)
 
-    Promise.all(
-      activeSeries.map(s =>
-        globalPlaybackController.getTopicFieldValues(
-          s.topic,
-          s.path,
-          fileSummary.startNs,
-        ),
-      ),
-    ).then((results) => {
+    const request = globalPlaybackController.getPlotSeriesData(
+      dataRequests,
+      fileSummary.startNs,
+      fileSummary.endNs,
+    )
+    request.promise.then((results) => {
       if (!isCurrent) {
         return
       }
 
-      const merged = mergeTimeSeries(results)
+      const resultById = new Map(results.map(result => [result.id, result]))
+      const orderedResults = dataRequests.map(({ id }) => resultById.get(id) ?? {
+        times: new Float64Array(),
+        values: new Float64Array(),
+      })
+      const merged = mergeTimeSeries(orderedResults)
       setChartData(merged)
       setLoadingData(false)
     }).catch((err) => {
@@ -142,8 +144,9 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
 
     return () => {
       isCurrent = false
+      globalPlaybackController.cancelPlotSeriesData(request.requestId)
     }
-  }, [activeSeries, activeSeriesSerialized, emptyChartData, fileSummary])
+  }, [dataRequests, emptyChartData, fileSummary])
 
   const chartOptions = useMemo<UPlotChartOptions | null>(() => {
     if (!fileSummary) {
@@ -273,7 +276,7 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
           grid: { stroke: gridCol },
           stroke: textCol,
           font: '10px monospace',
-          values: (u, splits) => splits.map(val => `${val.toFixed(1)}s`),
+          values: (_, splits) => splits.map(val => `${val.toFixed(1)}s`),
         },
         {
           grid: { stroke: gridCol },
@@ -284,7 +287,7 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
       series: [
         {
           label: 'Time',
-          value: (u, v) => (v == null ? '-' : `${v.toFixed(2)}s`),
+          value: (_, v) => (v == null ? '-' : `${v.toFixed(2)}s`),
         },
         ...activeSeries.map(s => ({
           label: s.name || s.path,
@@ -362,7 +365,7 @@ export default function PlotPanel({ panelId, config }: PanelComponentProps<PlotP
         {loadingData && (
           <div className="absolute inset-0 bg-background/50 flex flex-col items-center justify-center z-10 text-muted-foreground select-none">
             <Loader2 className="w-6 h-6 animate-spin text-primary mb-2" />
-            <p className="text-[10px] font-semibold">Extracting full datasets...</p>
+            <p className="text-[10px] font-semibold">Extracting optimized datasets...</p>
           </div>
         )}
 

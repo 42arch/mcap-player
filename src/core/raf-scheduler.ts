@@ -12,7 +12,7 @@ const FRAME_BUDGET_MS = 8
 const SLOW_FLUSH_MS = 16
 const SLOW_TASK_MS = 8
 const DIAGNOSTIC_COOLDOWN_MS = 1000
-const ENABLE_RAF_DIAGNOSTICS = true
+const ENABLE_RAF_DIAGNOSTICS = import.meta.env.DEV
 let lastDiagnosticMs = 0
 
 function shouldLogDiagnostic(now: number): boolean {
@@ -88,11 +88,13 @@ function flush() {
 export function scheduleFrame(task: Task): () => void {
   queue.add(task)
   requestFlush()
-  return () => {
-    queue.delete(task)
-  }
+  return () => cancelFrame(task)
 }
 
 export function cancelFrame(task: Task): void {
   queue.delete(task)
+  if (queue.size === 0 && rafId != null && typeof cancelAnimationFrame !== 'undefined') {
+    cancelAnimationFrame(rafId)
+    rafId = null
+  }
 }

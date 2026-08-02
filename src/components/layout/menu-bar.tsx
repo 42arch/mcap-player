@@ -27,13 +27,12 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const setIsLoading = usePlayerStore(state => state.setIsLoading)
-  const setFileSummary = usePlayerStore(state => state.setFileSummary)
   const setError = usePlayerStore(state => state.setError)
   const resetPanels = usePanelStore(state => state.resetPanels)
 
   const handleCloseFile = () => {
     resetPanels()
-    setFileSummary(null)
+    globalPlaybackController.closeFile()
   }
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {

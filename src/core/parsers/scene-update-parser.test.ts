@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMapFrame, parseSceneUpdate, SceneUpdateState } from './scene-update-parser'
+import { parseSceneUpdate, SceneUpdateState } from './scene-update-parser'
 
 describe('parseSceneUpdate', () => {
   it('keeps entity poses in their source frame for the renderer to transform by frame', () => {
@@ -28,12 +28,6 @@ describe('parseSceneUpdate', () => {
       orientation: [0, 0, 0.5, 0.5],
       size: [4, 2, 1.5],
     })
-  })
-
-  it('recognizes absolute and relative map frame identifiers', () => {
-    expect(isMapFrame('map')).toBe(true)
-    expect(isMapFrame('/map')).toBe(true)
-    expect(isMapFrame('base_link')).toBe(false)
   })
 
   it('parses line primitives used by foxglove.SceneUpdate semantic maps', () => {

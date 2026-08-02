@@ -41,6 +41,54 @@ describe('messagePipeline', () => {
     expect(rawMessages).toEqual(['/imu'])
   })
 
+  it('delivers high-priority consumers before normal consumers', () => {
+    const pipeline = new MessagePipeline()
+    const deliveryOrder: string[] = []
+    pipeline.subscribe({
+      panelId: 'raw-camera',
+      subscriptionId: 'message',
+      topics: [{ topic: '/camera', mode: 'all' }],
+    }, () => deliveryOrder.push('normal'))
+    pipeline.subscribe({
+      panelId: 'image-camera',
+      subscriptionId: 'frame',
+      topics: [{ topic: '/camera', mode: 'all', priority: 'high' }],
+    }, () => deliveryOrder.push('high'))
+
+    pipeline.dispatch([message('/camera', 1)])
+
+    expect(deliveryOrder).toEqual(['high', 'normal'])
+  })
+
+  it('shares one animation frame across latest subscriptions', () => {
+    let scheduledFrame: FrameRequestCallback | undefined
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      scheduledFrame = callback
+      return 1
+    })
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrame)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const pipeline = new MessagePipeline()
+    const received: string[] = []
+    pipeline.subscribe({
+      panelId: 'one',
+      subscriptionId: 'latest',
+      topics: [{ topic: '/camera', mode: 'latest' }],
+    }, () => received.push('one'))
+    pipeline.subscribe({
+      panelId: 'two',
+      subscriptionId: 'latest',
+      topics: [{ topic: '/camera', mode: 'latest' }],
+    }, () => received.push('two'))
+
+    pipeline.dispatch([message('/camera', 1)])
+
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1)
+    scheduledFrame?.(0)
+    expect(received).toEqual(['one', 'two'])
+  })
+
   it('requests the strongest delivery policy for a shared topic', () => {
     const pipeline = new MessagePipeline()
     pipeline.subscribe({
@@ -57,6 +105,32 @@ describe('messagePipeline', () => {
     expect(pipeline.getQueryPlan()).toEqual({
       topics: ['/camera/front'],
       modeByTopic: { '/camera/front': 'all' },
+    })
+  })
+
+  it('merges duplicate topic interests without delivering twice', () => {
+    const pipeline = new MessagePipeline()
+    const received: number[] = []
+    pipeline.subscribe({
+      panelId: 'combined',
+      subscriptionId: 'camera',
+      topics: [
+        {
+          topic: '/camera',
+          mode: 'latest',
+          priority: 'high',
+          processor: { type: 'point-cloud', maxPoints: 100 },
+        },
+        { topic: '/camera', mode: 'all' },
+      ],
+    }, event => received.push(event.sequence))
+
+    pipeline.dispatch([message('/camera', 1)])
+
+    expect(received).toEqual([1])
+    expect(pipeline.getQueryPlan()).toEqual({
+      topics: ['/camera'],
+      modeByTopic: { '/camera': 'all' },
     })
   })
 

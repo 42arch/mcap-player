@@ -38,11 +38,6 @@ export function getThreeDTopicKind(schemaName: string | undefined, topic: string
   return null
 }
 
-export function isThreeDChannel(channel: ThreeDChannelLike): boolean {
-  const kind = getThreeDTopicKind(channel.schemaName, channel.topic)
-  return kind !== null && kind !== 'transform'
-}
-
 export function isTransformChannel(channel: ThreeDChannelLike): boolean {
   return getThreeDTopicKind(channel.schemaName, channel.topic) === 'transform'
 }

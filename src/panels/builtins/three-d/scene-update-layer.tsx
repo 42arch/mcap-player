@@ -1,6 +1,7 @@
 import type { AssetLoadTracker } from './asset-load-tracker'
 import type { SceneLayerProps } from './scene-renderer-registry'
 import type { FrameTransformCoordinator } from './tf-coordinator'
+import type { DisposableResourceHandle } from '@/core/disposable-resource-cache'
 import type {
   ColorTuple,
   ParsedArrow,
@@ -18,6 +19,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { registerDatasetResourceCleaner } from '@/core/dataset-resource-registry'
+import { DisposableResourceCache } from '@/core/disposable-resource-cache'
 import { createEmptySceneUpdate, SceneUpdateState } from '@/core/parsers/scene-update-parser'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { getAssetLabel } from './asset-load-tracker'
@@ -437,11 +440,91 @@ function TextPrimitiveView({ text }: { text: ParsedText }) {
   )
 }
 
-const gltfCache = new Map<string, THREE.Group>()
-const loadingPromises = new Map<string, Promise<THREE.Group>>()
+const MAX_CACHED_GLTF_SCENES = 16
+
+function disposeGltfScene(scene: THREE.Group) {
+  const geometries = new Set<THREE.BufferGeometry>()
+  const materials = new Set<THREE.Material>()
+  const textures = new Set<THREE.Texture>()
+
+  scene.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) {
+      return
+    }
+    geometries.add(object.geometry)
+    const objectMaterials = Array.isArray(object.material) ? object.material : [object.material]
+    for (const material of objectMaterials) {
+      materials.add(material)
+      for (const value of Object.values(material)) {
+        if (value instanceof THREE.Texture) {
+          textures.add(value)
+        }
+      }
+    }
+  })
+
+  for (const texture of textures) texture.dispose()
+  for (const material of materials) material.dispose()
+  for (const geometry of geometries) geometry.dispose()
+}
+
+const gltfCache = new DisposableResourceCache<THREE.Group>(
+  MAX_CACHED_GLTF_SCENES,
+  disposeGltfScene,
+)
+
+registerDatasetResourceCleaner(() => gltfCache.clear())
 
 function cloneGltfScene(scene: THREE.Group): THREE.Group {
   return scene.clone(true)
+}
+
+function getEmbeddedModelCacheKey(data: Uint8Array): string {
+  let hash = 2_166_136_261
+  for (const value of data) {
+    hash ^= value
+    hash = Math.imul(hash, 16_777_619)
+  }
+  return `embedded-data:${data.byteLength}:${(hash >>> 0).toString(16)}`
+}
+
+function loadGltfScene(url: string | undefined, data: Uint8Array | undefined): Promise<THREE.Group> {
+  return new Promise<THREE.Group>((resolve, reject) => {
+    const loader = new GLTFLoader()
+    loader.setMeshoptDecoder(MeshoptDecoder)
+
+    let loadUrl = url
+    let blobUrl: string | null = null
+    if (data && data.byteLength > 0) {
+      const bytes = new Uint8Array(Array.from(data))
+      const blob = new Blob([bytes], { type: 'model/gltf-binary' })
+      blobUrl = URL.createObjectURL(blob)
+      loadUrl = blobUrl
+    }
+
+    if (!loadUrl) {
+      reject(new Error('No valid URL or binary data for model'))
+      return
+    }
+
+    const releaseBlobUrl = () => {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl)
+      }
+    }
+    loader.load(
+      loadUrl,
+      (gltf) => {
+        releaseBlobUrl()
+        resolve(gltf.scene)
+      },
+      undefined,
+      (error) => {
+        releaseBlobUrl()
+        reject(error)
+      },
+    )
+  })
 }
 
 function EgoVehicleModel({ assetLoadTracker, model }: { assetLoadTracker: AssetLoadTracker, model: ParsedModel }) {
@@ -449,87 +532,51 @@ function EgoVehicleModel({ assetLoadTracker, model }: { assetLoadTracker: AssetL
 
   const url = model.url
   const hasData = Boolean(model.data && model.data.byteLength > 0)
+  const cacheKey = useMemo(
+    () => url || (model.data && hasData ? getEmbeddedModelCacheKey(model.data) : ''),
+    [hasData, model.data, url],
+  )
 
   useEffect(() => {
     let isMounted = true
-    const cacheKey = url || (hasData ? 'embedded-data' : '')
+    let resourceHandle: DisposableResourceHandle<THREE.Group> | null = null
 
     if (!cacheKey) {
       return
     }
 
-    if (gltfCache.has(cacheKey)) {
-      setGltfScene(cloneGltfScene(gltfCache.get(cacheKey)!))
-      return
-    }
-
-    const assetLoad = assetLoadTracker.begin(cacheKey, getAssetLabel(url || '', 'Embedded 3D model'))
-    if (!loadingPromises.has(cacheKey)) {
-      const promise = new Promise<THREE.Group>((resolve, reject) => {
-        const loader = new GLTFLoader()
-        loader.setMeshoptDecoder(MeshoptDecoder)
-
-        let loadUrl = url
-        let blobUrl: string | null = null
-
-        if (hasData && model.data) {
-          const u8 = new Uint8Array(Array.from(model.data))
-          const blob = new Blob([u8], { type: 'model/gltf-binary' })
-          blobUrl = URL.createObjectURL(blob)
-          loadUrl = blobUrl
-        }
-
-        if (!loadUrl) {
-          reject(new Error('No valid URL or binary data for model'))
-          return
-        }
-
-        loader.load(
-          loadUrl,
-          (gltf) => {
-            if (blobUrl) {
-              URL.revokeObjectURL(blobUrl)
-            }
-            gltfCache.set(cacheKey, gltf.scene)
-            loadingPromises.delete(cacheKey)
-            resolve(gltf.scene)
-          },
-          undefined,
-          (err) => {
-            if (blobUrl) {
-              URL.revokeObjectURL(blobUrl)
-            }
-            loadingPromises.delete(cacheKey)
-            reject(err)
-          },
-        )
-      })
-      loadingPromises.set(cacheKey, promise)
-    }
-
-    loadingPromises
-      .get(cacheKey)!
-      .then((scene) => {
-        assetLoad.finish()
+    setGltfScene(null)
+    const assetLoad = gltfCache.has(cacheKey)
+      ? null
+      : assetLoadTracker.begin(cacheKey, getAssetLabel(url || '', 'Embedded 3D model'))
+    gltfCache.acquire(cacheKey, () => loadGltfScene(url, model.data))
+      .then((handle) => {
+        resourceHandle = handle
+        assetLoad?.finish()
         if (isMounted) {
-          setGltfScene(cloneGltfScene(scene))
+          setGltfScene(cloneGltfScene(handle.resource))
+        }
+        else {
+          handle.release()
+          resourceHandle = null
         }
       })
       .catch((err) => {
-        assetLoad.finish()
+        assetLoad?.finish()
         console.warn('Failed to load GLB vehicle model:', cacheKey, err)
       })
 
     return () => {
       isMounted = false
-      assetLoad.cancel()
+      resourceHandle?.release()
+      assetLoad?.cancel()
     }
-  }, [assetLoadTracker, url, hasData])
+  }, [assetLoadTracker, cacheKey, model.data, url])
 
   return (
     <group position={model.position} quaternion={model.orientation} scale={model.scale}>
       {gltfScene
-        ? <primitive object={gltfScene} rotation={[Math.PI / 2, 0, 0]} />
+        ? <primitive object={gltfScene} rotation={[Math.PI / 2, 0, 0]} dispose={null} />
         : (
           // Fallback stylized vehicle model while loading GLB
             <group>

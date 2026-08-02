@@ -1,25 +1,26 @@
-export function getValueByPath(obj: any, path: string): number | null {
-  if (obj === null || obj === undefined || !path) {
-    return null
-  }
-
+export function createNumericValueAccessor(path: string): (obj: any) => number | null {
   const normalizedPath = path.replace(/\[(\w+)\]/g, '.$1')
   const parts = normalizedPath.split('.').filter(Boolean)
 
-  let current = obj
-  for (const part of parts) {
+  return (obj: any) => {
+    if (obj === null || obj === undefined || parts.length === 0) {
+      return null
+    }
+    let current = obj
+    for (const part of parts) {
+      if (current === null || current === undefined) {
+        return null
+      }
+      current = current[part]
+    }
+
     if (current === null || current === undefined) {
       return null
     }
-    current = current[part]
-  }
 
-  if (current === null || current === undefined) {
-    return null
+    const val = Number(current)
+    return Number.isNaN(val) ? null : val
   }
-
-  const val = Number(current)
-  return Number.isNaN(val) ? null : val
 }
 
 export function getNumericFields(obj: any, parentPath = ''): string[] {

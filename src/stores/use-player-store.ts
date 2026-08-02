@@ -81,7 +81,6 @@ interface PlayerStore {
   // Playback state
   isPlaying: boolean
   playbackSpeed: number
-  elapsedNs: bigint // nanoseconds relative to startNs (i.e. starts at 0n)
 
   // Topic selection in the metadata sidebar
   selectedTopic: string | null
@@ -92,7 +91,6 @@ interface PlayerStore {
 
   setIsPlaying: (playing: boolean) => void
   setPlaybackSpeed: (speed: number) => void
-  setElapsedNs: (ns: bigint) => void
   setSelectedTopic: (topic: string | null) => void
 }
 
@@ -104,7 +102,6 @@ export const usePlayerStore = create<PlayerStore>(set => ({
 
   isPlaying: false,
   playbackSpeed: 1.0,
-  elapsedNs: 0n,
 
   selectedTopic: null,
 
@@ -114,7 +111,6 @@ export const usePlayerStore = create<PlayerStore>(set => ({
       isLoading: false,
       error: null,
       isPlaying: false,
-      elapsedNs: 0n,
       selectedTopic: null,
     }),
   setIsLoading: (loading, message = '') =>
@@ -123,6 +119,5 @@ export const usePlayerStore = create<PlayerStore>(set => ({
 
   setIsPlaying: playing => set({ isPlaying: playing }),
   setPlaybackSpeed: speed => set({ playbackSpeed: speed }),
-  setElapsedNs: ns => set({ elapsedNs: ns }),
   setSelectedTopic: topic => set({ selectedTopic: topic }),
 }))

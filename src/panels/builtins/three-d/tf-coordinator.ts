@@ -12,6 +12,60 @@ function normalizeFrameId(frameId: unknown): string {
   return typeof frameId === 'string' ? frameId.replace(/^\/+/, '') : ''
 }
 
+function normalizeTransformTopic(topic: unknown): string {
+  if (typeof topic !== 'string') {
+    return ''
+  }
+  const normalized = topic.trim().toLowerCase().replace(/\/+$/, '')
+  return normalized.startsWith('/') ? normalized : `/${normalized}`
+}
+
+function getTransformTopicPriority(topic: string): number {
+  if (topic === '/tf') {
+    return 3
+  }
+  if (topic.endsWith('/tf_static')) {
+    return 1
+  }
+  return topic ? 2 : 0
+}
+
+/**
+ * A TF tree may contain the same child on several discovered TF topics. ROS
+ * requires a child to have one authority, so choose one deterministically:
+ * canonical /tf, then another dynamic topic, then a static topic. This keeps
+ * seek snapshots and live playback from alternating between authorities.
+ */
+function isPreferredTransformTopic(incoming: string, current: string): boolean {
+  const incomingPriority = getTransformTopicPriority(incoming)
+  const currentPriority = getTransformTopicPriority(current)
+  if (incomingPriority !== currentPriority) {
+    return incomingPriority > currentPriority
+  }
+  return incoming.localeCompare(current) < 0
+}
+
+function getAutomaticFixedFramePriority(frameId: string): number {
+  const frameName = frameId.split('/').at(-1)?.toLowerCase()
+  switch (frameName) {
+    case 'earth':
+      return 4
+    case 'world':
+      return 3
+    case 'map':
+      return 2
+    case 'odom':
+      return 1
+    default:
+      return 0
+  }
+}
+
+function compareAutomaticFixedFrames(a: string, b: string): number {
+  const priorityDifference = getAutomaticFixedFramePriority(b) - getAutomaticFixedFramePriority(a)
+  return priorityDifference || a.localeCompare(b)
+}
+
 function extractTransforms(payload: any): TransformRecord[] {
   if (!payload) {
     return []
@@ -47,6 +101,7 @@ export class FrameTransformCoordinator {
   private unsubscribers: (() => void)[] = []
   private listeners = new Set<() => void>()
   private transformsByChild = new Map<string, THREE.Matrix4>()
+  private sourceTopicByChild = new Map<string, string>()
   private parentByChild = new Map<string, string>()
   private childrenByParent = new Map<string, Set<string>>()
   private targets = new Map<THREE.Object3D, string>()
@@ -54,18 +109,29 @@ export class FrameTransformCoordinator {
   private legacyLidarMatchers = new Map<THREE.Object3D, (frameId: string) => boolean>()
   private configuredFixedFrameId: string | null = null
   private receivedSinceSeek = true
+  private isSeeking = false
+  private fixedFrameBeforeSeek: string | null = null
 
   constructor(private readonly panelId = 'standalone') {}
 
   connect(topics: readonly string[] = ['/tf']) {
     this.disconnectSubscriptions()
+    this.isSeeking = false
+    this.fixedFrameBeforeSeek = null
+    this.receivedSinceSeek = true
     this.unsubscribers.push(globalMessagePipeline.subscribeSeek(this.panelId, () => {
+      this.fixedFrameBeforeSeek = this.getResolvedFixedFrame()
+      this.isSeeking = true
       this.receivedSinceSeek = false
     }))
     this.unsubscribers.push(globalMessagePipeline.subscribeSeekComplete(this.panelId, () => {
       if (!this.receivedSinceSeek) {
-        this.clearTransformState()
+        this.clearTransformState(false)
       }
+      this.isSeeking = false
+      this.updateTargets()
+      this.notifyIfFixedFrameChanged(this.fixedFrameBeforeSeek)
+      this.fixedFrameBeforeSeek = null
     }))
     for (const topic of new Set(topics)) {
       this.unsubscribers.push(globalMessagePipeline.subscribe({
@@ -74,13 +140,16 @@ export class FrameTransformCoordinator {
         topics: [{ topic, mode: 'all' }],
       }, (message: any) => {
         this.receivedSinceSeek = true
-        this.consume(message?.payload, message?.transformSnapshot === true)
+        this.consume(message?.payload, message?.transformSnapshot === true, message?.topic)
       }))
     }
   }
 
   disconnect() {
     this.disconnectSubscriptions()
+    this.isSeeking = false
+    this.fixedFrameBeforeSeek = null
+    this.receivedSinceSeek = true
     this.clearTransformState()
   }
 
@@ -142,16 +211,25 @@ export class FrameTransformCoordinator {
     }
   }
 
-  consume(payload: any, replaceState = false) {
+  consume(payload: any, replaceState = false, sourceTopic = '') {
     const previousFixedFrame = this.getResolvedFixedFrame()
     if (replaceState) {
       this.clearTransformState(false)
     }
+    const normalizedSourceTopic = normalizeTransformTopic(sourceTopic)
     let hasChanges = false
     for (const transform of extractTransforms(payload)) {
       const parent = normalizeFrameId(transform.parentFrameId)
       const child = normalizeFrameId(transform.childFrameId)
       if (!parent || !child) {
+        continue
+      }
+      const currentSourceTopic = this.sourceTopicByChild.get(child)
+      if (
+        currentSourceTopic !== undefined
+        && currentSourceTopic !== normalizedSourceTopic
+        && !isPreferredTransformTopic(normalizedSourceTopic, currentSourceTopic)
+      ) {
         continue
       }
       const translation = transform.translation || {}
@@ -170,6 +248,7 @@ export class FrameTransformCoordinator {
         }
       }
       this.transformsByChild.set(child, matrix)
+      this.sourceTopicByChild.set(child, normalizedSourceTopic)
       this.parentByChild.set(child, parent)
       let children = this.childrenByParent.get(parent)
       if (!children) {
@@ -184,19 +263,24 @@ export class FrameTransformCoordinator {
       }
       hasChanges = true
     }
-    if (hasChanges) {
+    if (hasChanges && !this.isSeeking) {
       this.updateTargets()
     }
-    this.notifyIfFixedFrameChanged(previousFixedFrame)
+    if (!this.isSeeking) {
+      this.notifyIfFixedFrameChanged(previousFixedFrame)
+    }
   }
 
   private clearTransformState(notify = true) {
     const previousFixedFrame = this.getResolvedFixedFrame()
     this.transformsByChild.clear()
+    this.sourceTopicByChild.clear()
     this.parentByChild.clear()
     this.childrenByParent.clear()
-    for (const object of this.targets.keys()) {
-      this.applyFallbackTransform(object)
+    if (!this.isSeeking) {
+      for (const object of this.targets.keys()) {
+        this.applyFallbackTransform(object)
+      }
     }
     if (notify) {
       this.notifyIfFixedFrameChanged(previousFixedFrame)
@@ -222,12 +306,13 @@ export class FrameTransformCoordinator {
     }
 
     // A valid TF tree root is a parent frame that never appears as a child.
-    for (const parentFrame of this.childrenByParent.keys()) {
-      if (!this.parentByChild.has(parentFrame)) {
-        return parentFrame
-      }
-    }
-    return null
+    // Snapshot reconstruction can insert the same roots in a different order
+    // than live playback, so never let Map insertion order select the fixed
+    // frame. Prefer conventional global frames, then a lexical fallback.
+    const roots = Array.from(this.childrenByParent.keys())
+      .filter(parentFrame => !this.parentByChild.has(parentFrame))
+      .sort(compareAutomaticFixedFrames)
+    return roots[0] || null
   }
 
   private notifyIfFixedFrameChanged(previousFixedFrame: string | null) {

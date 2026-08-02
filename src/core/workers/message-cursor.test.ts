@@ -3,64 +3,10 @@ import {
   copyBinaryPayload,
   getTransferableBuffers,
   isSlowBackfillChannel,
+  isTransformBackfillChannel,
   MessageCursor,
   sanitizePayload,
-  selectLatestMessages,
-  selectLatestWithSceneUpdates,
 } from './message-cursor'
-
-interface Message {
-  topic: string
-  sequence: number
-}
-
-describe('selectLatestMessages', () => {
-  it('keeps only the last message for each topic', () => {
-    const messages: Message[] = [
-      { topic: '/camera', sequence: 1 },
-      { topic: '/imu', sequence: 1 },
-      { topic: '/camera', sequence: 2 },
-      { topic: '/imu', sequence: 2 },
-    ]
-
-    expect(selectLatestMessages(messages, message => message.topic)).toEqual([
-      { topic: '/camera', sequence: 2 },
-      { topic: '/imu', sequence: 2 },
-    ])
-  })
-
-  it('omits messages without a resolved topic', () => {
-    const messages = [
-      { topic: '/camera', sequence: 1 },
-      { topic: '', sequence: 2 },
-    ]
-
-    expect(selectLatestMessages(messages, message => message.topic || undefined)).toEqual([
-      { topic: '/camera', sequence: 1 },
-    ])
-  })
-})
-
-describe('selectLatestWithSceneUpdates', () => {
-  it('preserves ordered SceneUpdate messages while reducing point-cloud topics', () => {
-    const messages = [
-      { topic: '/points', sequence: 1, scene: false },
-      { topic: '/markers', sequence: 1, scene: true },
-      { topic: '/points', sequence: 2, scene: false },
-      { topic: '/markers', sequence: 2, scene: true },
-    ]
-
-    expect(selectLatestWithSceneUpdates(
-      messages,
-      message => message.topic,
-      message => message.scene,
-    )).toEqual([
-      { topic: '/markers', sequence: 1, scene: true },
-      { topic: '/points', sequence: 2, scene: false },
-      { topic: '/markers', sequence: 2, scene: true },
-    ])
-  })
-})
 
 describe('binary transfer helpers', () => {
   it('copies only the bytes in a typed-array view', () => {
@@ -111,12 +57,89 @@ describe('binary transfer helpers', () => {
   })
 })
 
+describe('bounded playback batches', () => {
+  it('continues a large interval without losing messages at the same timestamp', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = Array.from({ length: 600 }, (_, index) => ({
+      channelId: 1,
+      logTime: 10n,
+      publishTime: 10n,
+      sequence: index,
+      data: encoder.encode(JSON.stringify({ index })),
+    }))
+    const reader = {
+      channelsById: new Map([[1, { topic: '/camera', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'custom.Message',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: () => (async function* () {
+        yield* rawMessages
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+    cursor.reset(0n, ['/camera'], 'placeholder')
+
+    const received: number[] = []
+    let batch = await cursor.drainUpTo(10n, { '/camera': 'all' })
+    let batchCount = 0
+    while (true) {
+      batchCount++
+      expect(batch.messages.length).toBeLessThanOrEqual(256)
+      received.push(...batch.messages.map(message => message.sequence))
+      if (!batch.hasMore) {
+        break
+      }
+      expect(batch.readThroughTimeNs).toBe(10n)
+      batch = await cursor.drainUpTo(10n, { '/camera': 'all' })
+    }
+
+    expect(batchCount).toBeGreaterThan(1)
+    expect(received).toEqual(Array.from({ length: 600 }, (_, index) => index))
+  })
+
+  it('coalesces latest topics inside every bounded batch', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = Array.from({ length: 300 }, (_, index) => ({
+      channelId: 1,
+      logTime: BigInt(index),
+      publishTime: BigInt(index),
+      sequence: index,
+      data: encoder.encode(JSON.stringify({ index })),
+    }))
+    const reader = {
+      channelsById: new Map([[1, { topic: '/points', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'custom.Message',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: () => (async function* () {
+        yield* rawMessages
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+    cursor.reset(0n, ['/points'], 'placeholder')
+
+    const first = await cursor.drainUpTo(299n, { '/points': 'latest' })
+
+    expect(first.hasMore).toBe(true)
+    expect(first.messages).toHaveLength(1)
+    expect(first.messages[0].sequence).toBeGreaterThanOrEqual(0)
+  })
+})
+
 describe('backfill optimization', () => {
   it('classifies stateful and compressed topics as slow backfill', () => {
     expect(isSlowBackfillChannel('/scene', 'foxglove.SceneUpdate')).toBe(true)
     expect(isSlowBackfillChannel('/tf', 'custom.Transform')).toBe(true)
     expect(isSlowBackfillChannel('/camera', 'sensor_msgs/CompressedImage')).toBe(true)
     expect(isSlowBackfillChannel('/points', 'sensor_msgs/PointCloud2')).toBe(false)
+    expect(isTransformBackfillChannel('/refined/tf', 'tf2_msgs/TFMessage')).toBe(true)
+    expect(isTransformBackfillChannel('/camera', 'sensor_msgs/CompressedImage')).toBe(false)
   })
 
   it('compacts SceneUpdate history into one full update', async () => {
@@ -251,5 +274,114 @@ describe('backfill optimization', () => {
 
     await cursor.getBackfillMessages(20n, ['/tf'], 'placeholder')
     expect(readOptions[1].startTime).toBe(11n)
+  })
+
+  it('rebuilds interleaved TF topics with one shared MCAP scan', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = [
+      {
+        channelId: 1,
+        logTime: 1n,
+        publishTime: 1n,
+        sequence: 1,
+        data: encoder.encode(JSON.stringify({
+          transforms: [{
+            header: { frame_id: 'world' },
+            child_frame_id: 'body',
+            transform: { translation: { x: 1 }, rotation: { w: 1 } },
+          }],
+        })),
+      },
+      {
+        channelId: 2,
+        logTime: 2n,
+        publishTime: 2n,
+        sequence: 2,
+        data: encoder.encode(JSON.stringify({
+          transforms: [{
+            header: { frame_id: 'odom' },
+            child_frame_id: 'camera_init',
+            transform: { translation: { x: 2 }, rotation: { w: 1 } },
+          }],
+        })),
+      },
+    ]
+    const readOptions: Array<{ topics?: string[] }> = []
+    const reader = {
+      channelsById: new Map([
+        [1, { topic: '/tf', schemaId: 1 }],
+        [2, { topic: '/refined/tf', schemaId: 1 }],
+      ]),
+      schemasById: new Map([[1, {
+        name: 'tf2_msgs/TFMessage',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: (options: { topics?: string[] }) => (async function* () {
+        readOptions.push(options)
+        yield* rawMessages.filter(message => options.topics?.includes(
+          reader.channelsById.get(message.channelId)!.topic,
+        ))
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    const messages = await cursor.getBackfillMessages(
+      10n,
+      ['/refined/tf', '/tf'],
+      'placeholder',
+    )
+
+    expect(readOptions).toEqual([{ endTime: 11n, topics: ['/refined/tf', '/tf'] }])
+    expect(messages).toHaveLength(2)
+    expect(messages.map(message => message.topic)).toEqual(['/refined/tf', '/tf'])
+    expect(messages.filter(message => message.transformSnapshot)).toHaveLength(1)
+  })
+
+  it('prewarms interval checkpoints so later seeks scan only nearby TF messages', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = [
+      1n,
+      10_000_000_001n,
+      20_000_000_001n,
+      30_000_000_001n,
+    ].map((logTime, index) => ({
+      channelId: 1,
+      logTime,
+      publishTime: logTime,
+      sequence: index,
+      data: encoder.encode(JSON.stringify({
+        transforms: [{
+          header: { frame_id: 'world' },
+          child_frame_id: 'body',
+          transform: { translation: { x: index }, rotation: { w: 1 } },
+        }],
+      })),
+    }))
+    const readOptions: Array<{ startTime?: bigint, endTime?: bigint }> = []
+    const reader = {
+      channelsById: new Map([[1, { topic: '/tf', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'tf2_msgs/TFMessage',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: (options: { startTime?: bigint, endTime?: bigint }) => (async function* () {
+        readOptions.push(options)
+        yield* rawMessages.filter(message =>
+          (options.startTime === undefined || message.logTime >= options.startTime)
+          && (options.endTime === undefined || message.logTime < options.endTime),
+        )
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    await cursor.prewarmTransformCheckpoints(['/tf'], 35_000_000_000n)
+    await cursor.getBackfillMessages(25_000_000_000n, ['/tf'], 'placeholder')
+
+    expect(readOptions[0].startTime).toBeUndefined()
+    expect(readOptions[1].startTime).toBe(20_000_000_001n)
   })
 })

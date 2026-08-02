@@ -14,6 +14,7 @@ import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
 import { usePanelConfig } from '@/panels/core/panel-context'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
+import { WorkerImageViewer } from './worker-image-viewer'
 
 interface ImageViewerProps {
   panelId: string
@@ -22,7 +23,7 @@ interface ImageViewerProps {
   brightness: number
 }
 
-function ImageViewer({ panelId, topic, imageFit, brightness }: ImageViewerProps) {
+function MainThreadImageViewer({ panelId, topic, imageFit, brightness }: ImageViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [showLoading, setShowLoading] = useState(false)
   const [msgReceived, setMsgReceived] = useState(false)
@@ -242,7 +243,7 @@ function ImageViewer({ panelId, topic, imageFit, brightness }: ImageViewerProps)
     const unsub = globalMessagePipeline.subscribe({
       panelId,
       subscriptionId: 'image-frame',
-      topics: [{ topic, mode: 'latest' }],
+      topics: [{ topic, mode: 'latest', priority: 'high' }],
     }, (newMsg) => {
       setMsgReceived(true)
       msgQueue.push(newMsg)
@@ -307,6 +308,13 @@ function ImageViewer({ panelId, topic, imageFit, brightness }: ImageViewerProps)
       />
     </div>
   )
+}
+
+function ImageViewer(props: ImageViewerProps) {
+  const supportsWorkerRenderer = typeof Worker !== 'undefined' && typeof OffscreenCanvas !== 'undefined'
+  return supportsWorkerRenderer
+    ? <WorkerImageViewer {...props} />
+    : <MainThreadImageViewer {...props} />
 }
 
 export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelConfig>) {

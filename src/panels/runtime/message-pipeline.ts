@@ -1,6 +1,8 @@
 import type { MessageProcessor, MessageProcessorByTopic } from '@/core/message-processing'
+import { cancelFrame, scheduleFrame } from '@/core/raf-scheduler'
 
 export type DeliveryMode = 'all' | 'latest'
+export type DeliveryPriority = 'high' | 'normal'
 
 export interface PlaybackMessage {
   topic: string
@@ -17,6 +19,7 @@ export interface PlaybackMessage {
 export interface TopicSubscription {
   topic: string
   mode: DeliveryMode
+  priority?: DeliveryPriority
   processor?: MessageProcessor
   retainOnSeek?: (timeNs: bigint) => boolean
 }
@@ -29,8 +32,15 @@ export interface PanelSubscriptionOptions {
 
 interface SubscriptionRecord extends PanelSubscriptionOptions {
   listener: (message: PlaybackMessage) => void
+  interestsByTopic: Map<string, TopicSubscription>
   pendingLatest: Map<string, PlaybackMessage>
-  frameId: number | null
+  flushScheduled: boolean
+  flushTask: () => void
+}
+
+interface TopicSubscriberIndex {
+  high: Set<SubscriptionRecord>
+  normal: Set<SubscriptionRecord>
 }
 
 export interface QueryPlan {
@@ -39,23 +49,62 @@ export interface QueryPlan {
   processorsByTopic?: MessageProcessorByTopic
 }
 
+function mergeTopicSubscriptions(
+  current: TopicSubscription,
+  incoming: TopicSubscription,
+): TopicSubscription {
+  const retainOnSeek = current.retainOnSeek && incoming.retainOnSeek
+    ? (timeNs: bigint) => current.retainOnSeek!(timeNs) && incoming.retainOnSeek!(timeNs)
+    : undefined
+  const processor = current.processor && incoming.processor
+    ? {
+        type: 'point-cloud' as const,
+        maxPoints: Math.max(current.processor.maxPoints, incoming.processor.maxPoints),
+      }
+    : undefined
+  return {
+    topic: current.topic,
+    mode: current.mode === 'all' || incoming.mode === 'all' ? 'all' : 'latest',
+    priority: current.priority === 'high' || incoming.priority === 'high' ? 'high' : 'normal',
+    processor,
+    retainOnSeek,
+  }
+}
+
 export class MessagePipeline {
   private subscriptions = new Map<string, SubscriptionRecord>()
+  private subscribersByTopic = new Map<string, TopicSubscriberIndex>()
   private changeListeners = new Set<(panelId: string) => void>()
   private seekListeners = new Map<string, Set<(timeNs: bigint) => void>>()
   private seekCompleteListeners = new Map<string, Set<(timeNs: bigint) => void>>()
 
   subscribe(options: PanelSubscriptionOptions, listener: (message: PlaybackMessage) => void): () => void {
     const key = `${options.panelId}:${options.subscriptionId}`
+    const interestsByTopic = new Map<string, TopicSubscription>()
+    for (const subscription of options.topics) {
+      if (subscription.topic) {
+        const existing = interestsByTopic.get(subscription.topic)
+        interestsByTopic.set(
+          subscription.topic,
+          existing ? mergeTopicSubscriptions(existing, subscription) : subscription,
+        )
+      }
+    }
     const record: SubscriptionRecord = {
       ...options,
-      topics: options.topics.filter(subscription => Boolean(subscription.topic)),
+      topics: Array.from(interestsByTopic.values()),
       listener,
+      interestsByTopic,
       pendingLatest: new Map(),
-      frameId: null,
+      flushScheduled: false,
+      flushTask: () => {
+        record.flushScheduled = false
+        this.deliverPendingLatest(record)
+      },
     }
     this.disposeSubscription(key)
     this.subscriptions.set(key, record)
+    this.indexSubscription(record)
     this.notifySubscriptionChange(options.panelId)
 
     return () => {
@@ -130,9 +179,9 @@ export class MessagePipeline {
 
   emitSeek(timeNs: bigint) {
     for (const subscription of this.subscriptions.values()) {
-      if (subscription.frameId !== null) {
-        cancelAnimationFrame(subscription.frameId)
-        subscription.frameId = null
+      if (subscription.flushScheduled) {
+        cancelFrame(subscription.flushTask)
+        subscription.flushScheduled = false
       }
       subscription.pendingLatest.clear()
     }
@@ -195,39 +244,50 @@ export class MessagePipeline {
 
   private dispatchMatching(messages: readonly PlaybackMessage[], panelId?: string) {
     for (const message of messages) {
-      for (const subscription of this.subscriptions.values()) {
-        if (panelId && subscription.panelId !== panelId) {
-          continue
-        }
-        const interest = subscription.topics.find(topic => topic.topic === message.topic)
-        if (!interest) {
-          continue
-        }
-        if (interest.mode === 'all') {
-          subscription.listener(message)
-        }
-        else {
-          subscription.pendingLatest.set(message.topic, message)
-          this.scheduleLatestFlush(subscription)
-        }
+      const index = this.subscribersByTopic.get(message.topic)
+      if (!index) {
+        continue
+      }
+      this.dispatchToSubscribers(index.high, message, panelId)
+      this.dispatchToSubscribers(index.normal, message, panelId)
+    }
+  }
+
+  private dispatchToSubscribers(
+    subscribers: ReadonlySet<SubscriptionRecord>,
+    message: PlaybackMessage,
+    panelId?: string,
+  ) {
+    for (const subscription of subscribers) {
+      if (panelId && subscription.panelId !== panelId) {
+        continue
+      }
+      const interest = subscription.interestsByTopic.get(message.topic)
+      if (!interest) {
+        continue
+      }
+      if (interest.mode === 'all') {
+        subscription.listener(message)
+      }
+      else {
+        subscription.pendingLatest.set(message.topic, message)
+        this.scheduleLatestFlush(subscription)
       }
     }
   }
 
   private scheduleLatestFlush(subscription: SubscriptionRecord) {
-    if (subscription.frameId !== null) {
+    if (subscription.flushScheduled) {
       return
     }
-    subscription.frameId = requestAnimationFrame(() => {
-      subscription.frameId = null
-      this.deliverPendingLatest(subscription)
-    })
+    subscription.flushScheduled = true
+    scheduleFrame(subscription.flushTask)
   }
 
   private flushLatest(subscription: SubscriptionRecord) {
-    if (subscription.frameId !== null) {
-      cancelAnimationFrame(subscription.frameId)
-      subscription.frameId = null
+    if (subscription.flushScheduled) {
+      cancelFrame(subscription.flushTask)
+      subscription.flushScheduled = false
     }
     this.deliverPendingLatest(subscription)
   }
@@ -243,11 +303,38 @@ export class MessagePipeline {
     if (!subscription) {
       return
     }
-    if (subscription.frameId !== null) {
-      cancelAnimationFrame(subscription.frameId)
+    if (subscription.flushScheduled) {
+      cancelFrame(subscription.flushTask)
+      subscription.flushScheduled = false
     }
     subscription.pendingLatest.clear()
+    this.unindexSubscription(subscription)
     this.subscriptions.delete(key)
+  }
+
+  private indexSubscription(subscription: SubscriptionRecord) {
+    for (const interest of subscription.topics) {
+      let index = this.subscribersByTopic.get(interest.topic)
+      if (!index) {
+        index = { high: new Set(), normal: new Set() }
+        this.subscribersByTopic.set(interest.topic, index)
+      }
+      index[interest.priority === 'high' ? 'high' : 'normal'].add(subscription)
+    }
+  }
+
+  private unindexSubscription(subscription: SubscriptionRecord) {
+    for (const interest of subscription.topics) {
+      const index = this.subscribersByTopic.get(interest.topic)
+      if (!index) {
+        continue
+      }
+      index.high.delete(subscription)
+      index.normal.delete(subscription)
+      if (index.high.size === 0 && index.normal.size === 0) {
+        this.subscribersByTopic.delete(interest.topic)
+      }
+    }
   }
 
   private notifySubscriptionChange(panelId: string) {

@@ -101,10 +101,6 @@ export function createEmptySceneUpdate(): ParsedSceneUpdate {
   }
 }
 
-export function isMapFrame(frameId: string): boolean {
-  return frameId === 'map' || frameId === '/map'
-}
-
 function toBigInt(value: unknown): bigint {
   if (typeof value === 'bigint') {
     return value

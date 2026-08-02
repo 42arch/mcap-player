@@ -15,6 +15,11 @@ export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordin
   const lastPointCloudRef = useRef<PreparedPointCloud | null>(null)
   const unregisterFrameRef = useRef<(() => void) | null>(null)
   const receivedSinceSeekRef = useRef(true)
+  const isSeekingRef = useRef(false)
+  const pendingSeekPointCloudRef = useRef<{
+    frameId: string
+    pointCloud: PreparedPointCloud
+  } | null>(null)
 
   const { colorMode, maxPoints, pointSize, solidColor } = readPointCloudSettings(settings)
   const frameOverride = getSceneLayerFrameOverride(settings)
@@ -83,7 +88,7 @@ export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordin
   }
 
   useEffect(() => {
-    if (lastPointCloudRef.current) {
+    if (lastPointCloudRef.current && !isSeekingRef.current) {
       renderPointCloud(lastPointCloudRef.current)
     }
   }, [colorMode, solidColor, maxPoints])
@@ -107,6 +112,7 @@ export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordin
       topics: [{
         topic,
         mode: 'latest',
+        priority: 'high',
         processor: canPrepareInWorker
           ? { type: 'point-cloud', maxPoints }
           : undefined,
@@ -124,7 +130,11 @@ export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordin
         }
         receivedSinceSeekRef.current = true
         lastPointCloudRef.current = pointCloud
-        const frameId = frameOverride || adapted.frameId || pointCloud.frameId
+        const frameId = frameOverride || adapted.frameId || pointCloud.frameId || ''
+        if (isSeekingRef.current) {
+          pendingSeekPointCloudRef.current = { frameId, pointCloud }
+          return
+        }
         if (frameId) {
           tfCoordinator.setFrameTarget(points, frameId)
         }
@@ -137,9 +147,21 @@ export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordin
 
     // The current point cloud intentionally remains visible until backfill replaces it.
     const unsubSeek = globalMessagePipeline.subscribeSeek(panelId, () => {
+      isSeekingRef.current = true
+      pendingSeekPointCloudRef.current = null
       receivedSinceSeekRef.current = false
     })
     const unsubSeekComplete = globalMessagePipeline.subscribeSeekComplete(panelId, () => {
+      isSeekingRef.current = false
+      const pendingPointCloud = pendingSeekPointCloudRef.current
+      pendingSeekPointCloudRef.current = null
+      if (pendingPointCloud) {
+        if (pendingPointCloud.frameId) {
+          tfCoordinator.setFrameTarget(points, pendingPointCloud.frameId)
+        }
+        renderPointCloud(pendingPointCloud.pointCloud)
+        return
+      }
       if (receivedSinceSeekRef.current) {
         return
       }
@@ -149,6 +171,8 @@ export function PointCloudLayer({ adapter, panelId, channel, settings, tfCoordin
     return () => {
       unregisterFrameRef.current?.()
       unregisterFrameRef.current = null
+      isSeekingRef.current = false
+      pendingSeekPointCloudRef.current = null
       unsub()
       unsubSeek()
       unsubSeekComplete()

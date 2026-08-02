@@ -2,9 +2,10 @@ import type * as THREE from 'three'
 import type { AssetLoadTracker } from './asset-load-tracker'
 import type { SceneLayerProps } from './scene-renderer-registry'
 import type { FrameTransformCoordinator } from './tf-coordinator'
+import type { DisposableResourceHandle } from '@/core/disposable-resource-cache'
 import type { UrdfGeometry, UrdfLink, UrdfRobot, UrdfVisual } from '@/core/parsers/urdf-parser'
 import { useEffect, useRef, useState } from 'react'
-import { getUrdfMeshFormat, loadUrdfMeshGeometry } from '@/core/loaders/urdf-mesh-loader'
+import { acquireUrdfMeshGeometry, getUrdfMeshFormat } from '@/core/loaders/urdf-mesh-loader'
 import { parseUrdfRobot } from '@/core/parsers/urdf-parser'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
@@ -43,6 +44,7 @@ function RobotMeshVisual({
 
   useEffect(() => {
     let isCurrent = true
+    let resourceHandle: DisposableResourceHandle<THREE.BufferGeometry> | null = null
     const filename = geometry.filename
 
     if (!getUrdfMeshFormat(filename)) {
@@ -50,11 +52,16 @@ function RobotMeshVisual({
     }
 
     const assetLoad = assetLoadTracker.begin(filename, getAssetLabel(filename, 'Robot mesh'))
-    loadUrdfMeshGeometry(filename)
-      .then((value) => {
+    acquireUrdfMeshGeometry(filename)
+      .then((handle) => {
+        resourceHandle = handle
         assetLoad.finish()
         if (isCurrent) {
-          setLoadedGeometry({ filename, value })
+          setLoadedGeometry({ filename, value: handle.resource })
+        }
+        else {
+          handle.release()
+          resourceHandle = null
         }
       })
       .catch((error: unknown) => {
@@ -67,6 +74,7 @@ function RobotMeshVisual({
 
     return () => {
       isCurrent = false
+      resourceHandle?.release()
       assetLoad.cancel()
     }
   }, [assetLoadTracker, geometry.filename])
