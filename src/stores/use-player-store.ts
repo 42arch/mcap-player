@@ -59,6 +59,10 @@ export interface ThreeDSettings {
   labelFieldsByTopic: Record<string, string[]>
   /** "auto" resolves to the root of the observed transform graph. */
   fixedFrame: string
+  /** Coordinate frame used as the camera's playback reference. */
+  displayFrame: string
+  /** How the camera follows motion of the display frame. */
+  followMode: 'follow-pose' | 'follow-heading' | 'follow-position' | 'follow-none'
   /** @deprecated Point-cloud renderers now store settings per layer. */
   pointSize: number
   /** @deprecated Point-cloud renderers now store settings per layer. */

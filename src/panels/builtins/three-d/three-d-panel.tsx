@@ -60,6 +60,8 @@ export default function ThreeDPanel({ panelId }: PanelComponentProps<ThreeDPanel
     [fileSummary?.channels],
   )
   const fixedFrameSetting = threeDSettings.fixedFrame || 'auto'
+  const displayFrame = threeDSettings.displayFrame || 'map'
+  const followMode = threeDSettings.followMode || 'follow-position'
   const resolvedFixedFrame = useSyncExternalStore(
     tfCoordinator.subscribe,
     tfCoordinator.getFixedFrameSnapshot,
@@ -111,8 +113,11 @@ export default function ThreeDPanel({ panelId }: PanelComponentProps<ThreeDPanel
 
           <CameraControls
             contentRef={sceneContentRef}
+            displayFrame={displayFrame}
             focusRef={cameraFocusRef}
             focusKey={cameraFocusKey}
+            followMode={followMode}
+            tfCoordinator={tfCoordinator}
             waitForFrame={Boolean(resolvedFixedFrame) || canFrameWithoutTransforms}
           />
           <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
@@ -170,6 +175,14 @@ export default function ThreeDPanel({ panelId }: PanelComponentProps<ThreeDPanel
           Z-up · Fixed:
           {' '}
           {resolvedFixedFrame || 'local (waiting for transforms)'}
+          {' '}
+          · Display:
+          {' '}
+          {displayFrame}
+          {' '}
+          · Follow:
+          {' '}
+          {followMode.replace('follow-', '')}
           {' '}
           ·
           {' '}

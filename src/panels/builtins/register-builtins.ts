@@ -19,6 +19,8 @@ function createDefaultThreeDConfig(): ThreeDPanelConfig {
     layerSettings: {},
     labelFieldsByTopic: {},
     fixedFrame: 'auto',
+    displayFrame: 'map',
+    followMode: 'follow-position',
     pointSize: 2,
     colorMode: 'height',
     solidColor: '#00ffcc',
@@ -33,12 +35,22 @@ function migrateThreeDConfig(config: unknown): ThreeDPanelConfig {
   const previous = config && typeof config === 'object'
     ? config as Partial<ThreeDPanelConfig>
     : {}
+  const followMode = previous.followMode
   return {
     ...createDefaultThreeDConfig(),
     ...previous,
     fixedFrame: typeof previous.fixedFrame === 'string' && previous.fixedFrame.trim()
       ? previous.fixedFrame
       : 'auto',
+    displayFrame: typeof previous.displayFrame === 'string' && previous.displayFrame.trim()
+      ? previous.displayFrame
+      : 'map',
+    followMode: followMode === 'follow-pose'
+      || followMode === 'follow-heading'
+      || followMode === 'follow-position'
+      || followMode === 'follow-none'
+      ? followMode
+      : 'follow-position',
   }
 }
 
@@ -124,7 +136,7 @@ export function registerBuiltInPanels() {
   registerPanel<ThreeDPanelConfig>({
     type: '3d',
     title: '3D Spatial View',
-    configVersion: 3,
+    configVersion: 4,
     createDefaultConfig: createDefaultThreeDConfig,
     loadPanel: () => import('@/panels/builtins/three-d/three-d-panel'),
     loadSettings: () => import('@/panels/builtins/three-d/three-d-setting'),

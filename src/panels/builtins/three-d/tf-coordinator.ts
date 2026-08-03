@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
+import { clearFrameIds, setFrameIds } from './tf-frame-catalog'
 
 interface TransformRecord {
   parentFrameId: string
@@ -129,6 +130,7 @@ export class FrameTransformCoordinator {
         this.clearTransformState(false)
       }
       this.isSeeking = false
+      this.publishFrameIds()
       this.updateTargets()
       this.notifyIfFixedFrameChanged(this.fixedFrameBeforeSeek)
       this.fixedFrameBeforeSeek = null
@@ -159,6 +161,19 @@ export class FrameTransformCoordinator {
   }
 
   getFixedFrameSnapshot = (): string => this.getResolvedFixedFrame() || ''
+
+  /** Returns T(fixed <- frame) for viewport and tool consumers. */
+  getFrameTransform(frameId: string): THREE.Matrix4 | null {
+    const normalizedFrameId = normalizeFrameId(frameId)
+    const fixedFrameId = this.getResolvedFixedFrame()
+    if (!normalizedFrameId || !fixedFrameId) {
+      return null
+    }
+    if (normalizedFrameId === fixedFrameId) {
+      return new THREE.Matrix4().identity()
+    }
+    return this.lookupTransform(normalizedFrameId, fixedFrameId)
+  }
 
   /** Selects an explicit fixed frame, or derives one from the TF graph in auto mode. */
   setFixedFrame(frameId: string) {
@@ -264,6 +279,7 @@ export class FrameTransformCoordinator {
       hasChanges = true
     }
     if (hasChanges && !this.isSeeking) {
+      this.publishFrameIds()
       this.updateTargets()
     }
     if (!this.isSeeking) {
@@ -278,6 +294,7 @@ export class FrameTransformCoordinator {
     this.parentByChild.clear()
     this.childrenByParent.clear()
     if (!this.isSeeking) {
+      clearFrameIds(this.panelId)
       for (const object of this.targets.keys()) {
         this.applyFallbackTransform(object)
       }
@@ -292,6 +309,13 @@ export class FrameTransformCoordinator {
       unsubscribe()
     }
     this.unsubscribers = []
+  }
+
+  private publishFrameIds() {
+    setFrameIds(this.panelId, [
+      ...this.childrenByParent.keys(),
+      ...this.parentByChild.keys(),
+    ])
   }
 
   private updateTargets() {

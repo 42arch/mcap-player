@@ -1,6 +1,6 @@
 import type { PanelSettingsProps, ThreeDPanelConfig } from '@/panels/core/types'
 import { Eye, EyeOff } from 'lucide-react'
-import { Suspense, useMemo } from 'react'
+import { Suspense, useCallback, useMemo, useSyncExternalStore } from 'react'
 import { Button } from '@/components/ui/button'
 import { ColorPicker } from '@/components/ui/color-picker'
 import {
@@ -12,6 +12,14 @@ import {
   FieldTitle,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
@@ -23,6 +31,21 @@ import {
   resolveSceneLayerSettings,
   useRegisteredSceneRenderers,
 } from './scene-renderer-registry'
+import { getFrameIdsSnapshot, subscribeFrameIds } from './tf-frame-catalog'
+
+const FOLLOW_MODES = [
+  { value: 'follow-pose', label: 'Pose' },
+  { value: 'follow-heading', label: 'Heading' },
+  { value: 'follow-position', label: 'Position' },
+  { value: 'follow-none', label: 'Off' },
+] as const
+
+function includeSelectedFrame(frameIds: readonly string[], selectedFrame: string): readonly string[] {
+  if (!selectedFrame || selectedFrame === 'auto' || frameIds.includes(selectedFrame)) {
+    return frameIds
+  }
+  return [...frameIds, selectedFrame].sort()
+}
 
 export default function ThreeDSetting({
   panelId,
@@ -32,6 +55,26 @@ export default function ThreeDSetting({
   const channels = usePlayerStore(state => state.fileSummary?.channels)
   const sceneAdapters = useRegisteredSceneMessageAdapters()
   const sceneRenderers = useRegisteredSceneRenderers()
+  const subscribeToFrameIds = useCallback(
+    (listener: () => void) => subscribeFrameIds(panelId, listener),
+    [panelId],
+  )
+  const getPanelFrameIdsSnapshot = useCallback(() => getFrameIdsSnapshot(panelId), [panelId])
+  const availableFrameIds = useSyncExternalStore(
+    subscribeToFrameIds,
+    getPanelFrameIdsSnapshot,
+    getPanelFrameIdsSnapshot,
+  )
+  const fixedFrame = threeDSettings.fixedFrame || 'auto'
+  const displayFrame = threeDSettings.displayFrame || 'map'
+  const fixedFrameOptions = useMemo(
+    () => includeSelectedFrame(availableFrameIds, fixedFrame),
+    [availableFrameIds, fixedFrame],
+  )
+  const displayFrameOptions = useMemo(
+    () => includeSelectedFrame(availableFrameIds, displayFrame),
+    [availableFrameIds, displayFrame],
+  )
   const sceneLayers = useMemo(
     () => discoverSceneLayers(channels || [], sceneRenderers, sceneAdapters),
     [channels, sceneAdapters, sceneRenderers],
@@ -205,27 +248,78 @@ export default function ThreeDSetting({
         <Separator />
 
         <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-medium">Scene</h3>
+          <h3 className="text-sm font-medium">Frame</h3>
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor={`fixed-frame-${panelId}`}>Fixed Frame</FieldLabel>
-              <Input
-                id={`fixed-frame-${panelId}`}
-                value={threeDSettings.fixedFrame || 'auto'}
-                placeholder="auto"
-                spellCheck={false}
-                onBlur={(event) => {
-                  if (!event.currentTarget.value.trim()) {
-                    updateThreeDSettings({ fixedFrame: 'auto' })
-                  }
-                }}
-                onChange={event => updateThreeDSettings({ fixedFrame: event.target.value })}
-              />
+              <Select value={fixedFrame} onValueChange={value => updateThreeDSettings({ fixedFrame: value })}>
+                <SelectTrigger id={`fixed-frame-${panelId}`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectGroup>
+                    <SelectItem value="auto">Auto</SelectItem>
+                    {fixedFrameOptions.map(frameId => (
+                      <SelectItem key={frameId} value={frameId}>{frameId}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
               <FieldDescription>
-                Use “auto” to derive the root from the transform graph, or enter an explicit frame ID.
+                Use Auto to derive the TF root, or choose any available frame.
               </FieldDescription>
             </Field>
 
+            <Field>
+              <FieldLabel htmlFor={`display-frame-${panelId}`}>Display Frame</FieldLabel>
+              <Select value={displayFrame} onValueChange={value => updateThreeDSettings({ displayFrame: value })}>
+                <SelectTrigger id={`display-frame-${panelId}`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  <SelectGroup>
+                    {displayFrameOptions.map(frameId => (
+                      <SelectItem key={frameId} value={frameId}>{frameId}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                Camera reference frame. Options are discovered from the active TF tree.
+              </FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor={`follow-mode-${panelId}`}>Follow Mode</FieldLabel>
+              <Select
+                value={threeDSettings.followMode || 'follow-position'}
+                onValueChange={value => updateThreeDSettings({
+                  followMode: value as ThreeDPanelConfig['followMode'],
+                })}
+              >
+                <SelectTrigger id={`follow-mode-${panelId}`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {FOLLOW_MODES.map(mode => (
+                      <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                Choose whether the viewport follows pose, heading, position, or remains fixed.
+              </FieldDescription>
+            </Field>
+          </FieldGroup>
+        </section>
+
+        <Separator />
+
+        <section className="flex flex-col gap-3">
+          <h3 className="text-sm font-medium">Scene</h3>
+          <FieldGroup>
             <Field>
               <FieldLabel>Background Color</FieldLabel>
               <ColorPicker
