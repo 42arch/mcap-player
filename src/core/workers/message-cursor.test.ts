@@ -33,11 +33,12 @@ describe('binary transfer helpers', () => {
   it('collects prepared point-cloud buffers for zero-copy transfer', () => {
     const positions = new Float32Array([1, 2, 3])
     const intensities = new Float32Array([4])
+    const colors = new Float32Array([0, 1, 0])
     const buffers = getTransferableBuffers([
-      { payload: { positions, intensities } },
+      { payload: { positions, intensities, colors } },
     ] as any)
 
-    expect(buffers).toEqual([positions.buffer, intensities.buffer])
+    expect(buffers).toEqual([positions.buffer, intensities.buffer, colors.buffer])
   })
 
   it('preserves foxglove.Grid data as transferable bytes', () => {
@@ -383,5 +384,149 @@ describe('backfill optimization', () => {
 
     expect(readOptions[0].startTime).toBeUndefined()
     expect(readOptions[1].startTime).toBe(20_000_000_001n)
+  })
+
+  it('adds denser checkpoints for high-rate TF topics', async () => {
+    const encoder = new TextEncoder()
+    const rawMessages = Array.from({ length: 300 }, (_, index) => {
+      const logTime = BigInt(index + 1)
+      return {
+        channelId: 1,
+        logTime,
+        publishTime: logTime,
+        sequence: index,
+        data: encoder.encode(JSON.stringify({
+          transforms: [{
+            header: { frame_id: 'world' },
+            child_frame_id: 'body',
+            transform: { translation: { x: index }, rotation: { w: 1 } },
+          }],
+        })),
+      }
+    })
+    const readOptions: Array<{ startTime?: bigint, endTime?: bigint }> = []
+    const reader = {
+      channelsById: new Map([[1, { topic: '/tf', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'tf2_msgs/TFMessage',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      statistics: {
+        channelMessageCounts: new Map([[1, 300n]]),
+        messageStartTime: 1n,
+        messageEndTime: 300n,
+      },
+      readMessages: (options: { startTime?: bigint, endTime?: bigint }) => (async function* () {
+        readOptions.push(options)
+        yield* rawMessages.filter(message =>
+          (options.startTime === undefined || message.logTime >= options.startTime)
+          && (options.endTime === undefined || message.logTime < options.endTime),
+        )
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    await cursor.prewarmTransformCheckpoints(['/tf'], 300n)
+    await cursor.getBackfillMessages(250n, ['/tf'], 'placeholder')
+
+    expect(readOptions[1].startTime).toBe(130n)
+  })
+
+  it('keeps a sparse static TF checkpoint from widening the dynamic TF scan', async () => {
+    const encoder = new TextEncoder()
+    const dynamicMessages = [1n, 10_000_000_001n, 20_000_000_001n, 30_000_000_001n]
+      .map((logTime, index) => ({
+        channelId: 1,
+        logTime,
+        publishTime: logTime,
+        sequence: index,
+        data: encoder.encode(JSON.stringify({
+          transforms: [{
+            header: { frame_id: 'world' },
+            child_frame_id: 'body',
+            transform: { translation: { x: index }, rotation: { w: 1 } },
+          }],
+        })),
+      }))
+    const staticMessage = {
+      channelId: 2,
+      logTime: 2n,
+      publishTime: 2n,
+      sequence: 0,
+      data: encoder.encode(JSON.stringify({
+        transforms: [{
+          header: { frame_id: 'body' },
+          child_frame_id: 'lidar',
+          transform: { translation: { x: 1 }, rotation: { w: 1 } },
+        }],
+      })),
+    }
+    const rawMessages = [...dynamicMessages, staticMessage]
+      .sort((a, b) => a.logTime < b.logTime ? -1 : 1)
+    const readOptions: Array<{ startTime?: bigint, endTime?: bigint, topics?: string[] }> = []
+    const reader = {
+      channelsById: new Map([
+        [1, { topic: '/tf', schemaId: 1 }],
+        [2, { topic: '/tf_static', schemaId: 1 }],
+      ]),
+      schemasById: new Map([[1, {
+        name: 'tf2_msgs/TFMessage',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: (options: { startTime?: bigint, endTime?: bigint, topics?: string[] }) => (async function* () {
+        readOptions.push(options)
+        yield* rawMessages.filter(message =>
+          options.topics?.includes(reader.channelsById.get(message.channelId)!.topic)
+          && (options.startTime === undefined || message.logTime >= options.startTime)
+          && (options.endTime === undefined || message.logTime < options.endTime),
+        )
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    await cursor.prewarmTransformCheckpoints(['/tf', '/tf_static'], 35_000_000_000n)
+    await cursor.getBackfillMessages(25_000_000_000n, ['/tf', '/tf_static'], 'placeholder')
+
+    expect(readOptions[1]).toMatchObject({
+      startTime: 20_000_000_001n,
+      topics: ['/tf'],
+    })
+    expect(readOptions[2]).toMatchObject({
+      startTime: 3n,
+      topics: ['/tf_static'],
+    })
+  })
+
+  it('scans all unique frame IDs across transform channels', async () => {
+    const encoder = new TextEncoder()
+    const reader = {
+      channelsById: new Map([[1, { topic: '/tf', schemaId: 1 }]]),
+      schemasById: new Map([[1, {
+        name: 'tf2_msgs/TFMessage',
+        encoding: 'json',
+        data: new Uint8Array(),
+      }]]),
+      readMessages: () => (async function* () {
+        yield {
+          channelId: 1,
+          logTime: 10n,
+          data: encoder.encode(JSON.stringify({
+            transforms: [
+              { header: { frame_id: 'map' }, child_frame_id: 'odom' },
+              { header: { frame_id: 'odom' }, child_frame_id: 'base_link' },
+            ],
+          })),
+        }
+      })(),
+    }
+    const cursor = new MessageCursor()
+    cursor.setReader(reader as any)
+
+    const frameIds = await cursor.buildSpatialSeekIndex(10n)
+    expect(frameIds).toEqual(['base_link', 'map', 'odom'])
   })
 })

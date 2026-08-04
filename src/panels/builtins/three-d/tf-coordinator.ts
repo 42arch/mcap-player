@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
+import { clearFrameIds, setFrameIds } from './tf-frame-catalog'
 
 interface TransformRecord {
   parentFrameId: string
@@ -108,6 +109,7 @@ export class FrameTransformCoordinator {
   private fallbackTransforms = new Map<THREE.Object3D, THREE.Matrix4>()
   private legacyLidarMatchers = new Map<THREE.Object3D, (frameId: string) => boolean>()
   private configuredFixedFrameId: string | null = null
+  private invalidateScene: (() => void) | null = null
   private receivedSinceSeek = true
   private isSeeking = false
   private fixedFrameBeforeSeek: string | null = null
@@ -129,6 +131,7 @@ export class FrameTransformCoordinator {
         this.clearTransformState(false)
       }
       this.isSeeking = false
+      this.publishFrameIds()
       this.updateTargets()
       this.notifyIfFixedFrameChanged(this.fixedFrameBeforeSeek)
       this.fixedFrameBeforeSeek = null
@@ -160,6 +163,23 @@ export class FrameTransformCoordinator {
 
   getFixedFrameSnapshot = (): string => this.getResolvedFixedFrame() || ''
 
+  setSceneInvalidator(invalidator: (() => void) | null) {
+    this.invalidateScene = invalidator
+  }
+
+  /** Returns T(fixed <- frame) for viewport and tool consumers. */
+  getFrameTransform(frameId: string): THREE.Matrix4 | null {
+    const normalizedFrameId = normalizeFrameId(frameId)
+    const fixedFrameId = this.getResolvedFixedFrame()
+    if (!normalizedFrameId || !fixedFrameId) {
+      return null
+    }
+    if (normalizedFrameId === fixedFrameId) {
+      return new THREE.Matrix4().identity()
+    }
+    return this.lookupTransform(normalizedFrameId, fixedFrameId)
+  }
+
   /** Selects an explicit fixed frame, or derives one from the TF graph in auto mode. */
   setFixedFrame(frameId: string) {
     const normalized = frameId.trim().toLowerCase() === 'auto'
@@ -181,6 +201,7 @@ export class FrameTransformCoordinator {
     }
     this.targets.set(object, normalizeFrameId(frameId))
     this.applyTransform(object)
+    this.invalidateScene?.()
     return () => {
       this.targets.delete(object)
       this.fallbackTransforms.delete(object)
@@ -193,6 +214,7 @@ export class FrameTransformCoordinator {
     }
     this.targets.set(object, normalizeFrameId(frameId))
     this.applyTransform(object)
+    this.invalidateScene?.()
   }
 
   /** @deprecated Use registerFrameTarget with a message frame_id instead. */
@@ -264,6 +286,7 @@ export class FrameTransformCoordinator {
       hasChanges = true
     }
     if (hasChanges && !this.isSeeking) {
+      this.publishFrameIds()
       this.updateTargets()
     }
     if (!this.isSeeking) {
@@ -278,6 +301,7 @@ export class FrameTransformCoordinator {
     this.parentByChild.clear()
     this.childrenByParent.clear()
     if (!this.isSeeking) {
+      clearFrameIds(this.panelId)
       for (const object of this.targets.keys()) {
         this.applyFallbackTransform(object)
       }
@@ -285,6 +309,7 @@ export class FrameTransformCoordinator {
     if (notify) {
       this.notifyIfFixedFrameChanged(previousFixedFrame)
     }
+    this.invalidateScene?.()
   }
 
   private disconnectSubscriptions() {
@@ -294,10 +319,18 @@ export class FrameTransformCoordinator {
     this.unsubscribers = []
   }
 
+  private publishFrameIds() {
+    setFrameIds(this.panelId, [
+      ...this.childrenByParent.keys(),
+      ...this.parentByChild.keys(),
+    ])
+  }
+
   private updateTargets() {
     for (const object of this.targets.keys()) {
       this.applyTransform(object)
     }
+    this.invalidateScene?.()
   }
 
   private getResolvedFixedFrame(): string | null {

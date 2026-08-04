@@ -1,9 +1,11 @@
 import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { TimelineTopicData } from '@/core/workers/timeline-data'
+import type { BackfillClass } from '@/core/workers/topic-classifier'
 import { wrap } from 'comlink'
 import { resetDatasetResources } from '@/core/dataset-resource-registry'
 import { PlaybackBatchAccumulator } from '@/core/playback-batch-accumulator'
 import { setPlaybackElapsedNs } from '@/core/playback-time-store'
+import { getBackfillClass } from '@/core/workers/topic-classifier'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
 import { PlaybackClock } from './playback-clock'
@@ -19,8 +21,11 @@ interface PlaybackMessageBatch {
   hasMore: boolean
 }
 
+const SEEK_BACKFILL_PHASES: readonly BackfillClass[] = ['fast', 'spatial', 'media']
+
 export class PlaybackController {
   private worker: any = null
+  private seekWorker: any = null
   private clock: PlaybackClock | null = null
   private animationFrameId: number | null = null
   private lastTickTimeNs: bigint = 0n
@@ -33,6 +38,7 @@ export class PlaybackController {
   private seekGeneration = 0
   private pendingSeekBackfill: PendingSeekBackfill | null = null
   private isSeekBackfillRunning = false
+  private isSeekProcessorRunning = false
   private resumeAfterSeek = false
   private playbackBatchAccumulator = new PlaybackBatchAccumulator<any>()
   private timelineDataPromise: Promise<TimelineTopicData[]> | null = null
@@ -60,7 +66,7 @@ export class PlaybackController {
     }
     const ns = this.clock.get()
     const plan = globalMessagePipeline.getQueryPlan()
-    const worker = this.getWorker()
+    const worker = this.getSeekWorker()
     if (plan.topics.length > 0 && worker) {
       this.invalidatePlaybackQuery()
       const version = this.queryVersion
@@ -99,6 +105,21 @@ export class PlaybackController {
     return this.worker
   }
 
+  /**
+   * Random-access backfill has its own worker so timeline/plot scans and normal
+   * playback cannot queue ahead of an interactive seek.
+   */
+  private getSeekWorker() {
+    if (!this.seekWorker) {
+      const rawWorker = new Worker(
+        new URL('./workers/mcap.worker.ts', import.meta.url),
+        { type: 'module' },
+      )
+      this.seekWorker = wrap(rawWorker)
+    }
+    return this.seekWorker
+  }
+
   async loadFile(file: File) {
     this.pause()
     this.pendingSeekBackfill = null
@@ -109,7 +130,11 @@ export class PlaybackController {
     this.pendingQueryEndTimeNs = null
     this.timelineDataPromise = null
     const worker = this.getWorker()
-    const summary = await worker.initialize(file)
+    const seekWorker = this.getSeekWorker()
+    const [, summary] = await Promise.all([
+      worker.initialize(file, { buildSpatialIndex: false }),
+      seekWorker.initialize(file, { buildSpatialIndex: true }),
+    ])
     this.fileSummary = summary
     this.clock = new PlaybackClock(summary.startNs, summary.endNs)
     this.lastTickTimeNs = summary.startNs
@@ -191,12 +216,13 @@ export class PlaybackController {
     globalMessagePipeline.emitSeek(ns)
 
     const generation = ++this.seekGeneration
-    const worker = this.getWorker()
+    const worker = this.getSeekWorker()
     worker?.setSeekGeneration(generation).catch((error: unknown) => {
       console.error('Error updating seek generation in worker:', error)
     })
     // Keep only the most recent queued target while one backfill is running.
     this.pendingSeekBackfill = { generation, timeNs: ns }
+    this.isSeekBackfillRunning = true
     void this.processPendingSeekBackfills()
   }
 
@@ -277,49 +303,71 @@ export class PlaybackController {
   }
 
   private async processPendingSeekBackfills() {
-    if (this.isSeekBackfillRunning) {
+    if (this.isSeekProcessorRunning) {
       return
     }
 
+    this.isSeekProcessorRunning = true
     this.isSeekBackfillRunning = true
     try {
       while (this.pendingSeekBackfill) {
         const request = this.pendingSeekBackfill
         this.pendingSeekBackfill = null
         const plan = globalMessagePipeline.getSeekQueryPlan(request.timeNs)
-        const worker = this.getWorker()
+        const worker = this.getSeekWorker()
         if (plan.topics.length === 0 || !worker) {
           if (request.generation === this.seekGeneration) {
             globalMessagePipeline.emitSeekComplete(request.timeNs)
+            this.isSeekBackfillRunning = false
+            this.resumePlaybackAfterSeekIfReady()
           }
           continue
         }
 
         try {
-          const fastMessages = await worker.getBackfillMessages(
-            request.timeNs,
-            plan.topics,
-            false,
-            request.generation,
-            'fast',
-            plan.processorsByTopic,
-          )
-          if (request.generation !== this.seekGeneration) {
-            continue
-          }
-          globalMessagePipeline.dispatchSeekResult(fastMessages)
+          this.isSeekBackfillRunning = true
+          const topicsByPhase = this.groupSeekTopicsByPhase(plan.topics)
+          const completedTopics = new Set<string>()
+          const completedPanelIds = new Set<string>()
 
-          const slowMessages = await worker.getBackfillMessages(
-            request.timeNs,
-            plan.topics,
-            false,
-            request.generation,
-            'slow',
-            plan.processorsByTopic,
-          )
+          for (const phase of SEEK_BACKFILL_PHASES) {
+            const phaseTopics = topicsByPhase[phase]
+            if (phaseTopics.length > 0) {
+              const messages = await worker.getBackfillMessages(
+                request.timeNs,
+                plan.topics,
+                false,
+                request.generation,
+                phase,
+                plan.processorsByTopic,
+              )
+              if (request.generation !== this.seekGeneration) {
+                break
+              }
+              globalMessagePipeline.dispatchSeekResult(messages)
+            }
+
+            phaseTopics.forEach(topic => completedTopics.add(topic))
+            if (request.generation !== this.seekGeneration) {
+              break
+            }
+            const readyPanelIds = globalMessagePipeline
+              .getSeekReadyPanelIds(completedTopics, request.timeNs)
+              .filter(panelId => !completedPanelIds.has(panelId))
+            readyPanelIds.forEach(panelId => completedPanelIds.add(panelId))
+            globalMessagePipeline.emitSeekComplete(request.timeNs, readyPanelIds)
+
+            // Spatial state is the last dependency that must gate the playback
+            // clock. Media repair continues on the dedicated seek worker.
+            if (phase === 'spatial') {
+              this.isSeekBackfillRunning = false
+              this.resumePlaybackAfterSeekIfReady()
+            }
+          }
+
           if (request.generation === this.seekGeneration) {
-            globalMessagePipeline.dispatchSeekResult(slowMessages)
-            globalMessagePipeline.emitSeekComplete(request.timeNs)
+            this.isSeekBackfillRunning = false
+            this.resumePlaybackAfterSeekIfReady()
           }
         }
         catch (error) {
@@ -331,9 +379,33 @@ export class PlaybackController {
       }
     }
     finally {
+      this.isSeekProcessorRunning = false
       this.isSeekBackfillRunning = false
       this.resumePlaybackAfterSeekIfReady()
     }
+  }
+
+  private groupSeekTopicsByPhase(topics: readonly string[]): Record<BackfillClass, string[]> {
+    const result: Record<BackfillClass, string[]> = {
+      fast: [],
+      spatial: [],
+      media: [],
+    }
+    const channels = this.fileSummary?.channels || []
+    for (const topic of topics) {
+      let backfillClass: BackfillClass = 'fast'
+      for (const channel of channels) {
+        if (channel.topic !== topic) {
+          continue
+        }
+        const candidate = getBackfillClass(topic, channel.schemaName || '')
+        if (candidate === 'spatial' || backfillClass === 'fast') {
+          backfillClass = candidate
+        }
+      }
+      result[backfillClass].push(topic)
+    }
+    return result
   }
 
   private resumePlaybackAfterSeekIfReady() {

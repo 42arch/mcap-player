@@ -14,7 +14,8 @@ function deferred<T>() {
 
 function createControllerWithPendingBackfill() {
   const fast = deferred<any[]>()
-  const slow = deferred<any[]>()
+  const spatial = deferred<any[]>()
+  const media = deferred<any[]>()
   const worker = {
     setSeekGeneration: vi.fn().mockResolvedValue(undefined),
     getBackfillMessages: vi.fn((
@@ -22,17 +23,22 @@ function createControllerWithPendingBackfill() {
       _topics: string[],
       _preserveCursor: boolean,
       _generation: number,
-      phase: 'fast' | 'slow',
-    ) => phase === 'fast' ? fast.promise : slow.promise),
+      phase: 'fast' | 'spatial' | 'media',
+    ) => phase === 'fast' ? fast.promise : phase === 'spatial' ? spatial.promise : media.promise),
   }
   const clock = new PlaybackClock(0n, 100n)
   const controller = new PlaybackController()
   Object.assign(controller as any, {
     clock,
-    fileSummary: { startNs: 0n, endNs: 100n },
+    fileSummary: {
+      startNs: 0n,
+      endNs: 100n,
+      channels: [{ topic: '/cloud', schemaName: 'sensor_msgs/PointCloud2' }],
+    },
     worker,
+    seekWorker: worker,
   })
-  return { clock, controller, fast, slow, worker }
+  return { clock, controller, fast, media, spatial, worker }
 }
 
 describe('playback controller seek gating', () => {
@@ -49,7 +55,7 @@ describe('playback controller seek gating', () => {
       topics: ['/cloud'],
       modeByTopic: { '/cloud': 'latest' },
     })
-    const { clock, controller, fast, slow, worker } = createControllerWithPendingBackfill()
+    const { clock, controller, fast, worker } = createControllerWithPendingBackfill()
 
     controller.seek(10n)
     controller.play()
@@ -59,8 +65,6 @@ describe('playback controller seek gating', () => {
     expect(worker.getBackfillMessages).toHaveBeenCalledTimes(1)
 
     fast.resolve([])
-    await vi.waitFor(() => expect(worker.getBackfillMessages).toHaveBeenCalledTimes(2))
-    slow.resolve([])
     await vi.waitFor(() => expect(clock.getIsPlaying()).toBe(true))
 
     controller.pause()
@@ -73,7 +77,7 @@ describe('playback controller seek gating', () => {
       topics: ['/cloud'],
       modeByTopic: { '/cloud': 'latest' },
     })
-    const { clock, controller, fast, slow, worker } = createControllerWithPendingBackfill()
+    const { clock, controller, fast } = createControllerWithPendingBackfill()
     clock.play()
     usePlayerStore.getState().setIsPlaying(true)
 
@@ -81,10 +85,41 @@ describe('playback controller seek gating', () => {
 
     expect(clock.getIsPlaying()).toBe(false)
     fast.resolve([])
-    await vi.waitFor(() => expect(worker.getBackfillMessages).toHaveBeenCalledTimes(2))
-    slow.resolve([])
     await vi.waitFor(() => expect(clock.getIsPlaying()).toBe(true))
 
+    controller.pause()
+  })
+
+  it('does not block playback on media keyframe repair', async () => {
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    vi.spyOn(globalMessagePipeline, 'getSeekQueryPlan').mockReturnValue({
+      topics: ['/camera'],
+      modeByTopic: { '/camera': 'all' },
+    })
+    const { clock, controller, media, worker } = createControllerWithPendingBackfill()
+    Object.assign(controller as any, {
+      fileSummary: {
+        startNs: 0n,
+        endNs: 100n,
+        channels: [{ topic: '/camera', schemaName: 'foxglove.CompressedVideo' }],
+      },
+    })
+
+    controller.seek(30n)
+    controller.play()
+
+    await vi.waitFor(() => expect(worker.getBackfillMessages).toHaveBeenCalledWith(
+      30n,
+      ['/camera'],
+      false,
+      expect.any(Number),
+      'media',
+      undefined,
+    ))
+    expect(clock.getIsPlaying()).toBe(true)
+
+    media.resolve([])
     controller.pause()
   })
 })

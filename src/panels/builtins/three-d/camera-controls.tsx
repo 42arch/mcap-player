@@ -1,20 +1,34 @@
 import type { RefObject } from 'react'
+import type { FrameTransformCoordinator } from './tf-coordinator'
+import type { ThreeDSettings } from '@/stores/use-player-store'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { OrbitControls as OrbitControlsImpl } from 'three/examples/jsm/controls/OrbitControls.js'
+import { applyCameraFollow } from './camera-follow'
 
 interface CameraControlsProps {
   contentRef: RefObject<THREE.Group | null>
   focusRef?: RefObject<THREE.Object3D | null>
   focusKey: string
   waitForFrame: boolean
+  displayFrame: string
+  followMode: ThreeDSettings['followMode']
+  tfCoordinator: FrameTransformCoordinator
 }
 
 const MAX_FOCUS_WAIT_FRAMES = 120
 
-export function CameraControls({ contentRef, focusRef, focusKey, waitForFrame }: CameraControlsProps) {
-  const { camera, gl } = useThree()
+export function CameraControls({
+  contentRef,
+  displayFrame,
+  focusRef,
+  focusKey,
+  followMode,
+  tfCoordinator,
+  waitForFrame,
+}: CameraControlsProps) {
+  const { camera, gl, invalidate } = useThree()
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
   const hasFocusedRef = useRef(false)
   const focusWaitFramesRef = useRef(0)
@@ -23,26 +37,70 @@ export function CameraControls({ contentRef, focusRef, focusKey, waitForFrame }:
   const centerRef = useRef(new THREE.Vector3())
   const sizeRef = useRef(new THREE.Vector3())
   const offsetRef = useRef(new THREE.Vector3())
+  const previousDisplayTransformRef = useRef<THREE.Matrix4 | null>(null)
 
   useEffect(() => {
     const controls = new OrbitControlsImpl(camera, gl.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
     controls.target.set(0, 0, 0)
+    const requestRender = () => invalidate()
+    controls.addEventListener('change', requestRender)
     controlsRef.current = controls
+    invalidate()
 
     return () => {
+      controls.removeEventListener('change', requestRender)
       controls.dispose()
     }
-  }, [camera, gl])
+  }, [camera, gl, invalidate])
 
   useEffect(() => {
     hasFocusedRef.current = false
     focusWaitFramesRef.current = 0
-  }, [focusKey])
+    invalidate()
+  }, [focusKey, invalidate])
+
+  useEffect(() => {
+    previousDisplayTransformRef.current = null
+    invalidate()
+  }, [displayFrame, focusKey, followMode, invalidate])
+
+  useEffect(() => {
+    if (followMode === 'follow-position' || followMode === 'follow-heading') {
+      camera.up.set(0, 0, 1)
+      controlsRef.current?.update()
+    }
+    invalidate()
+  }, [camera, followMode, invalidate])
 
   useFrame(() => {
     const controls = controlsRef.current
+    if (controls) {
+      const perspectiveCamera = camera as THREE.PerspectiveCamera
+      const distance = camera.position.distanceTo(controls.target)
+      const targetFar = Math.max(5000, distance * 5)
+      const targetNear = Math.max(0.1, distance / 2000)
+      if (
+        Math.abs(perspectiveCamera.far - targetFar) > 10
+        || Math.abs(perspectiveCamera.near - targetNear) > 0.05
+      ) {
+        perspectiveCamera.far = targetFar
+        perspectiveCamera.near = targetNear
+        perspectiveCamera.updateProjectionMatrix()
+      }
+    }
+
+    const displayTransform = tfCoordinator.getFrameTransform(displayFrame)
+    const previousDisplayTransform = previousDisplayTransformRef.current
+    if (controls && displayTransform && previousDisplayTransform) {
+      applyCameraFollow({
+        cameraPosition: camera.position,
+        cameraUp: camera.up,
+        target: controls.target,
+      }, previousDisplayTransform, displayTransform, followMode)
+    }
+    previousDisplayTransformRef.current = displayTransform
     controls?.update()
     if (!controls || hasFocusedRef.current || !waitForFrame) {
       return
@@ -50,6 +108,9 @@ export function CameraControls({ contentRef, focusRef, focusKey, waitForFrame }:
 
     const content = contentRef.current
     if (!content) {
+      if (++focusWaitFramesRef.current < MAX_FOCUS_WAIT_FRAMES) {
+        invalidate()
+      }
       return
     }
 
@@ -58,6 +119,7 @@ export function CameraControls({ contentRef, focusRef, focusKey, waitForFrame }:
     if (focusRef) {
       if (!preferredContent) {
         if (++focusWaitFramesRef.current < MAX_FOCUS_WAIT_FRAMES) {
+          invalidate()
           return
         }
         bounds = boundsRef.current.setFromObject(content)
@@ -66,6 +128,7 @@ export function CameraControls({ contentRef, focusRef, focusKey, waitForFrame }:
         bounds = preferredBoundsRef.current.setFromObject(preferredContent)
         if (bounds.isEmpty()) {
           if (++focusWaitFramesRef.current < MAX_FOCUS_WAIT_FRAMES) {
+            invalidate()
             return
           }
           bounds = boundsRef.current.setFromObject(content)
@@ -76,6 +139,9 @@ export function CameraControls({ contentRef, focusRef, focusKey, waitForFrame }:
       bounds = boundsRef.current.setFromObject(content)
     }
     if (bounds.isEmpty()) {
+      if (++focusWaitFramesRef.current < MAX_FOCUS_WAIT_FRAMES) {
+        invalidate()
+      }
       return
     }
 

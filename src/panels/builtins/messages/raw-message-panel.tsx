@@ -134,14 +134,14 @@ export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMess
       <PanelContentHeader
         actions={fileSummary && channels.length > 0 && (
           <div className="flex min-w-0 items-center gap-2">
-            <span className="mcap-panel-content-header__label">Topic</span>
+            <span className="text-[9px] font-semibold tracking-wider uppercase text-muted-foreground shrink-0 hidden @[460px]:inline-block">Topic</span>
             <Select
               value={activeTopic || ''}
               onValueChange={(val) => {
                 updateConfig({ topic: val || null })
               }}
             >
-              <SelectTrigger size="sm" className="mcap-panel-topic-select w-48 max-w-full bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
+              <SelectTrigger size="sm" className="w-48 max-w-full @[460px]:w-48 @[340px]:w-36 bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
                 <SelectValue placeholder="Select topic..." />
               </SelectTrigger>
               <SelectContent position="popper" className="bg-popover text-popover-foreground">

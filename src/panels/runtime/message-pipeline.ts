@@ -60,6 +60,14 @@ function mergeTopicSubscriptions(
     ? {
         type: 'point-cloud' as const,
         maxPoints: Math.max(current.processor.maxPoints, incoming.processor.maxPoints),
+        ...(current.processor.colorMode !== undefined
+          && current.processor.colorMode === incoming.processor.colorMode
+          && current.processor.solidColor === incoming.processor.solidColor
+          ? {
+              colorMode: current.processor.colorMode,
+              solidColor: current.processor.solidColor,
+            }
+          : {}),
       }
     : undefined
   return {
@@ -190,10 +198,42 @@ export class MessagePipeline {
     }
   }
 
-  emitSeekComplete(timeNs: bigint) {
+  emitSeekComplete(timeNs: bigint, panelIds?: readonly string[]) {
+    if (panelIds) {
+      for (const panelId of panelIds) {
+        this.seekCompleteListeners.get(panelId)?.forEach(listener => listener(timeNs))
+      }
+      return
+    }
     for (const listeners of this.seekCompleteListeners.values()) {
       listeners.forEach(listener => listener(timeNs))
     }
+  }
+
+  /**
+   * Reports panels whose entire seek dependency set has completed. This lets a
+   * 3D panel commit its TF + point-cloud snapshot without waiting for an
+   * unrelated H.264 panel to search backward to a keyframe.
+   */
+  getSeekReadyPanelIds(completedTopics: ReadonlySet<string>, timeNs: bigint): string[] {
+    const readiness = new Map<string, boolean>()
+    for (const panelId of this.seekCompleteListeners.keys()) {
+      readiness.set(panelId, true)
+    }
+    for (const subscription of this.subscriptions.values()) {
+      readiness.set(subscription.panelId, readiness.get(subscription.panelId) ?? true)
+      for (const topic of subscription.topics) {
+        if (topic.retainOnSeek?.(timeNs)) {
+          continue
+        }
+        if (!completedTopics.has(topic.topic)) {
+          readiness.set(subscription.panelId, false)
+          break
+        }
+      }
+    }
+    return Array.from(readiness, ([panelId, ready]) => ready ? panelId : null)
+      .filter((panelId): panelId is string => panelId !== null)
   }
 
   getQueryPlan(): QueryPlan {
@@ -226,7 +266,18 @@ export class MessagePipeline {
         }
         const existing = processorsByTopic[topic.topic]
         processorsByTopic[topic.topic] = existing?.type === 'point-cloud'
-          ? { type: 'point-cloud', maxPoints: Math.max(existing.maxPoints, topic.processor.maxPoints) }
+          ? {
+              type: 'point-cloud',
+              maxPoints: Math.max(existing.maxPoints, topic.processor.maxPoints),
+              ...(existing.colorMode !== undefined
+                && existing.colorMode === topic.processor.colorMode
+                && existing.solidColor === topic.processor.solidColor
+                ? {
+                    colorMode: existing.colorMode,
+                    solidColor: existing.solidColor,
+                  }
+                : {}),
+            }
           : topic.processor
       }
     }

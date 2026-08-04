@@ -62,37 +62,6 @@ describe('parseSceneUpdate', () => {
     ])
   })
 
-  it('creates configured labels above entity cubes', () => {
-    const parsed = parseSceneUpdate({
-      entities: [
-        {
-          id: 'vehicle-12',
-          frame_id: 'map',
-          metadata: [{ key: 'category', value: 'vehicle.car' }],
-          cubes: [
-            {
-              pose: { position: { x: 4, y: 2, z: 1 } },
-              size: { x: 4, y: 2, z: 2 },
-            },
-          ],
-        },
-      ],
-    }, {
-      labelFields: ['metadata.category', 'id'],
-    })
-
-    expect(parsed.texts).toEqual([
-      expect.objectContaining({
-        id: 'vehicle-12-derived-label-0',
-        text: 'vehicle.car · vehicle-12',
-        frameId: 'map',
-        position: [4, 2, 2.3],
-        hasBackground: true,
-        screenSize: 22,
-      }),
-    ])
-  })
-
   it('applies entity replacement, deletion, and lifetime as SceneUpdate state', () => {
     const state = new SceneUpdateState()
     const start = 1_000_000_000n
@@ -124,21 +93,6 @@ describe('parseSceneUpdate', () => {
       }],
     }, start)
     expect(state.apply({ entities: [] }, start + 1_000_000_000n).cubes).toHaveLength(0)
-  })
-
-  it('rebuilds labels from stored entities without replaying messages', () => {
-    const state = new SceneUpdateState()
-    state.apply({
-      entities: [{
-        id: 'pedestrian-1',
-        metadata: [{ key: 'category', value: 'human.pedestrian' }],
-        cubes: [{ size: { x: 1, y: 1, z: 2 } }],
-      }],
-    }, 0n)
-
-    expect(state.snapshot().texts).toHaveLength(0)
-    expect(state.snapshot({ labelFields: ['metadata.category'] }).texts[0].text)
-      .toBe('human.pedestrian')
   })
 
   it('exports a full update with lifetime relative to the snapshot time', () => {

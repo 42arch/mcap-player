@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { FrameTransformCoordinator } from './tf-coordinator'
+import { getFrameIdsSnapshot } from './tf-frame-catalog'
 
 describe('frameTransformCoordinator', () => {
   it('updates registered map and lidar targets without React state', () => {
@@ -182,6 +183,41 @@ describe('frameTransformCoordinator', () => {
     expect(coordinator.getFixedFrameSnapshot()).toBe('base_link_underpan')
   })
 
+  it('exposes display-frame transforms relative to the resolved fixed frame', () => {
+    const coordinator = new FrameTransformCoordinator()
+    coordinator.consume({
+      parent_frame_id: 'map',
+      child_frame_id: 'base_link',
+      translation: { x: 411, y: 1181, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    })
+
+    expect(coordinator.getFrameTransform('map')?.elements).toEqual(new THREE.Matrix4().identity().elements)
+    expect(coordinator.getFrameTransform('/base_link')?.elements[12]).toBeCloseTo(411)
+    expect(coordinator.getFrameTransform('missing')).toBeNull()
+  })
+
+  it('publishes every available parent and child frame for panel settings', () => {
+    const panelId = 'tf-frame-options-test'
+    const coordinator = new FrameTransformCoordinator(panelId)
+    coordinator.consume({
+      parent_frame_id: 'map',
+      child_frame_id: 'base_link',
+      translation: { x: 1, y: 2, z: 0 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    })
+    coordinator.consume({
+      parent_frame_id: 'base_link',
+      child_frame_id: '/LIDAR_TOP',
+      translation: { x: 1, y: 0, z: 2 },
+      rotation: { x: 0, y: 0, z: 0, w: 1 },
+    })
+
+    expect(getFrameIdsSnapshot(panelId)).toEqual(['LIDAR_TOP', 'base_link', 'map'])
+    coordinator.disconnect()
+    expect(getFrameIdsSnapshot(panelId)).toEqual([])
+  })
+
   it('notifies subscribers only when the resolved fixed frame changes', () => {
     const coordinator = new FrameTransformCoordinator()
     let notifications = 0
@@ -318,6 +354,7 @@ describe('frameTransformCoordinator', () => {
     try {
       globalMessagePipeline.dispatchToPanel(panelId, [message('/tf', 1)])
       expect(body.position.x).toBeCloseTo(1)
+      expect(getFrameIdsSnapshot(panelId)).toEqual(['body', 'world'])
 
       globalMessagePipeline.emitSeek(10n)
       globalMessagePipeline.dispatchToPanel(panelId, [
@@ -325,9 +362,11 @@ describe('frameTransformCoordinator', () => {
         message('/tf', 2),
       ])
       expect(body.position.x).toBeCloseTo(1)
+      expect(getFrameIdsSnapshot(panelId)).toEqual(['body', 'world'])
 
       globalMessagePipeline.emitSeekComplete(10n)
       expect(body.position.x).toBeCloseTo(2)
+      expect(getFrameIdsSnapshot(panelId)).toEqual(['body', 'world'])
 
       globalMessagePipeline.dispatchToPanel(panelId, [message('/refined/tf', 200)])
       expect(body.position.x).toBeCloseTo(2)

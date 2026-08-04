@@ -282,4 +282,27 @@ describe('messagePipeline', () => {
 
     expect(events).toEqual(['message:2', 'complete'])
   })
+
+  it('marks 3D ready without waiting for an unrelated media panel', () => {
+    const pipeline = new MessagePipeline()
+    pipeline.subscribe({
+      panelId: 'three-d',
+      subscriptionId: 'scene',
+      topics: [
+        { topic: '/points', mode: 'latest' },
+        { topic: '/tf', mode: 'all' },
+      ],
+    }, () => {})
+    pipeline.subscribe({
+      panelId: 'image',
+      subscriptionId: 'camera',
+      topics: [{ topic: '/camera', mode: 'all' }],
+    }, () => {})
+
+    expect(pipeline.getSeekReadyPanelIds(new Set(['/points', '/tf']), 10n)).toEqual(['three-d'])
+    expect(pipeline.getSeekReadyPanelIds(new Set(['/points', '/tf', '/camera']), 10n)).toEqual([
+      'three-d',
+      'image',
+    ])
+  })
 })

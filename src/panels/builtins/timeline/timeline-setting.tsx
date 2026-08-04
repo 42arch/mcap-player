@@ -4,15 +4,13 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Field,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
-  FieldLegend,
-  FieldSet,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { usePlayerStore } from '@/stores/use-player-store'
+import { SettingGroup } from '../setting-group'
 
 interface TopicOption {
   topic: string
@@ -70,78 +68,76 @@ export default function TimelineSetting({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-card p-4 text-foreground">
-      <FieldSet className="min-h-0 flex-1 gap-3">
-        <FieldLegend>Timeline topics</FieldLegend>
-        <FieldDescription>
-          Choose which topic rows are visible. All topics are shown by default.
-        </FieldDescription>
+    <div className="flex min-h-0 flex-1 flex-col bg-background text-foreground">
+      <div className="flex-1 overflow-y-auto">
+        <SettingGroup
+          title={`Timeline Topics (${selectedTopicSet.size}/${allTopics.length})`}
+          description="Choose which topic rows are visible. All topics are shown by default."
+          defaultOpen
+        >
+          <div className="space-y-2.5">
+            <Field>
+              <FieldLabel htmlFor={`${fieldId}-search`} className="sr-only">
+                Filter topics
+              </FieldLabel>
+              <Input
+                id={`${fieldId}-search`}
+                value={searchQuery}
+                onChange={event => setSearchQuery(event.target.value)}
+                placeholder="Filter topics…"
+              />
+            </Field>
 
-        <Field>
-          <FieldLabel htmlFor={`${fieldId}-search`} className="sr-only">
-            Filter topics
-          </FieldLabel>
-          <Input
-            id={`${fieldId}-search`}
-            value={searchQuery}
-            onChange={event => setSearchQuery(event.target.value)}
-            placeholder="Filter topics…"
-          />
-        </Field>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => updateConfig({ visibleTopics: null })}
+              >
+                Select all
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={() => updateConfig({ visibleTopics: [] })}
+              >
+                Clear
+              </Button>
+            </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={() => updateConfig({ visibleTopics: null })}
-          >
-            Select all
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            onClick={() => updateConfig({ visibleTopics: [] })}
-          >
-            Clear
-          </Button>
-          <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-            {selectedTopicSet.size}
-            /
-            {allTopics.length}
-          </span>
-        </div>
-
-        <ScrollArea className="min-h-0 flex-1 rounded-md border border-border">
-          <FieldGroup data-slot="checkbox-group" className="gap-0 p-1">
-            {filteredOptions.map((option: TopicOption) => {
-              const checkboxId = `${fieldId}-${encodeURIComponent(option.topic)}`
-              return (
-                <Field
-                  key={option.topic}
-                  orientation="horizontal"
-                  className="rounded-md px-2 py-1.5 hover:bg-accent"
-                >
-                  <Checkbox
-                    id={checkboxId}
-                    checked={selectedTopicSet.has(option.topic)}
-                    onCheckedChange={checked => toggleTopic(option.topic, checked === true)}
-                  />
-                  <FieldLabel htmlFor={checkboxId} className="min-w-0 cursor-pointer">
-                    <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={option.topic}>
-                      {option.topic}
-                    </span>
-                    <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
-                      {option.messageCount.toLocaleString()}
-                    </span>
-                  </FieldLabel>
-                </Field>
-              )
-            })}
-          </FieldGroup>
-        </ScrollArea>
-      </FieldSet>
+            <ScrollArea className="max-h-80 rounded-md border border-border">
+              <FieldGroup data-slot="checkbox-group" className="gap-0 p-1">
+                {filteredOptions.map((option: TopicOption) => {
+                  const checkboxId = `${fieldId}-${encodeURIComponent(option.topic)}`
+                  return (
+                    <Field
+                      key={option.topic}
+                      orientation="horizontal"
+                      className="rounded-md px-2 py-1 hover:bg-accent"
+                    >
+                      <Checkbox
+                        id={checkboxId}
+                        checked={selectedTopicSet.has(option.topic)}
+                        onCheckedChange={checked => toggleTopic(option.topic, checked === true)}
+                      />
+                      <FieldLabel htmlFor={checkboxId} className="min-w-0 cursor-pointer">
+                        <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={option.topic}>
+                          {option.topic}
+                        </span>
+                        <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
+                          {option.messageCount.toLocaleString()}
+                        </span>
+                      </FieldLabel>
+                    </Field>
+                  )
+                })}
+              </FieldGroup>
+            </ScrollArea>
+          </div>
+        </SettingGroup>
+      </div>
     </div>
   )
 }

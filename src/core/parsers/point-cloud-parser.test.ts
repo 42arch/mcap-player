@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  colorizePreparedPointCloud,
   PREPARED_POINT_CLOUD_FORMAT,
   preparePointCloud,
   renderPreparedPointCloud,
@@ -60,5 +61,20 @@ describe('point cloud preparation', () => {
     expect(rendered?.pointCount).toBe(2)
     expect(Array.from(rendered!.positions)).toEqual([0, 0, 0, 2, 4, 6])
     expect(Array.from(rendered!.colors)).toEqual([1, 0, 0, 1, 0, 0])
+  })
+
+  it('uses worker-prepared colors without recomputing them on the render path', () => {
+    const prepared = colorizePreparedPointCloud(
+      preparePointCloud(createPointCloudPayload(), 4)!,
+      'solid',
+      '#00ff00',
+    )
+    const rendered = renderPreparedPointCloud(prepared, {
+      colorMode: 'solid',
+      solidColor: '#00ff00',
+      maxPoints: 4,
+    })
+
+    expect(Array.from(rendered!.colors)).toEqual([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0])
   })
 })

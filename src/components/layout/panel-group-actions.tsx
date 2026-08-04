@@ -109,7 +109,7 @@ export default function PanelGroupActions({
   }, [activePanel])
 
   return (
-    <div className="mcap-panel-group-actions">
+    <div className="flex h-full shrink-0 items-center gap-0.5 px-1 border-l border-border bg-header">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

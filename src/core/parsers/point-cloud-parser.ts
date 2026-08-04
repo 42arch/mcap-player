@@ -5,6 +5,9 @@ export interface PreparedPointCloud {
   frameId?: string
   positions: Float32Array
   intensities?: Float32Array
+  colors?: Float32Array
+  colorMode?: ColorMode
+  solidColor?: string
   pointCount: number
   minX: number
   maxX: number
@@ -237,6 +240,7 @@ function downsamplePreparedPointCloud(
   const pointCount = Math.ceil(pointCloud.pointCount / step)
   const positions = new Float32Array(pointCount * 3)
   const intensities = pointCloud.hasIntensity ? new Float32Array(pointCount) : undefined
+  const colors = pointCloud.colors ? new Float32Array(pointCount * 3) : undefined
 
   let targetIndex = 0
   for (let sourceIndex = 0; sourceIndex < pointCloud.pointCount; sourceIndex += step) {
@@ -244,15 +248,56 @@ function downsamplePreparedPointCloud(
     if (intensities && pointCloud.intensities) {
       intensities[targetIndex] = pointCloud.intensities[sourceIndex]
     }
+    if (colors && pointCloud.colors) {
+      colors.set(pointCloud.colors.subarray(sourceIndex * 3, sourceIndex * 3 + 3), targetIndex * 3)
+    }
     targetIndex++
   }
 
-  return finishPreparedPointCloud(
-    pointCloud.frameId,
-    positions,
-    intensities,
-    targetIndex,
-  )!
+  return {
+    ...finishPreparedPointCloud(
+      pointCloud.frameId,
+      positions,
+      intensities,
+      targetIndex,
+    )!,
+    colors,
+    colorMode: pointCloud.colorMode,
+    solidColor: pointCloud.solidColor,
+  }
+}
+
+export function colorizePreparedPointCloud(
+  pointCloud: PreparedPointCloud,
+  colorMode: ColorMode,
+  solidColor = '#00ffcc',
+): PreparedPointCloud {
+  const colors = new Float32Array(pointCloud.pointCount * 3)
+  const solid = hexToRgb(solidColor)
+  const zRange = pointCloud.maxZ > pointCloud.minZ ? pointCloud.maxZ - pointCloud.minZ : 1
+  const intensityRange = pointCloud.maxIntensity > pointCloud.minIntensity
+    ? pointCloud.maxIntensity - pointCloud.minIntensity
+    : 1
+
+  for (let index = 0; index < pointCloud.pointCount; index++) {
+    let color = solid
+    if (colorMode === 'height') {
+      color = getSpectrumColor((pointCloud.positions[index * 3 + 2] - pointCloud.minZ) / zRange)
+    }
+    else if (colorMode === 'intensity' && pointCloud.intensities) {
+      color = getSpectrumColor(
+        (pointCloud.intensities[index] - pointCloud.minIntensity) / intensityRange,
+      )
+    }
+    colors.set(color, index * 3)
+  }
+
+  return {
+    ...pointCloud,
+    colors,
+    colorMode,
+    solidColor,
+  }
 }
 
 function prepareBinaryPointCloud(payload: UnknownRecord, maxPoints: number): PreparedPointCloud | null {
@@ -401,6 +446,28 @@ export function renderPreparedPointCloud(
     ? output.colors
     : new Float32Array(requiredLength)
   positions.set(sampled.positions.subarray(0, requiredLength), 0)
+
+  const canUsePreparedColors = sampled.colors
+    && sampled.colors.length >= requiredLength
+    && sampled.colorMode === options.colorMode
+    && (options.colorMode !== 'solid' || sampled.solidColor === (options.solidColor || '#00ffcc'))
+  if (canUsePreparedColors) {
+    colors.set(sampled.colors!.subarray(0, requiredLength), 0)
+    return {
+      positions: positions.subarray(0, requiredLength),
+      colors: colors.subarray(0, requiredLength),
+      pointCount: sampled.pointCount,
+      minX: sampled.minX,
+      maxX: sampled.maxX,
+      minY: sampled.minY,
+      maxY: sampled.maxY,
+      minZ: sampled.minZ,
+      maxZ: sampled.maxZ,
+      minIntensity: sampled.minIntensity,
+      maxIntensity: sampled.maxIntensity,
+      hasIntensity: sampled.hasIntensity,
+    }
+  }
 
   const solidColor = hexToRgb(options.solidColor || '#00ffcc')
   const zRange = sampled.maxZ > sampled.minZ ? sampled.maxZ - sampled.minZ : 1

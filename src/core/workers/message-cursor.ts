@@ -1,13 +1,40 @@
 import type { McapIndexedReader } from '@mcap/core'
+import type { SceneUpdateState } from '../parsers/scene-update-parser'
+import type {
+  BackfillCheckpoint,
+} from './backfill-checkpoint-cache'
+import type {
+  TransformUpdateState,
+} from './transform-state-accumulator'
 import type { MessageProcessor, MessageProcessorByTopic } from '@/core/message-processing'
-import { parse } from '@foxglove/rosmsg'
-import { MessageReader as Ros2Reader } from '@foxglove/rosmsg2-serialization'
-import { MessageReader as Ros1Reader } from '@foxglove/rosmsg-serialization'
-import protobuf from 'protobufjs'
 import { checkH264IsKeyframe, isH264Format } from '@/core/parsers/h264'
-import { preparePointCloud } from '@/core/parsers/point-cloud-parser'
-import { SceneUpdateState } from '@/core/parsers/scene-update-parser'
-import 'protobufjs/ext/descriptor'
+import { colorizePreparedPointCloud, preparePointCloud } from '@/core/parsers/point-cloud-parser'
+import { createMessageDeserializer } from './message-decoders'
+import { getSceneBackfillSnapshot } from './scene-backfill-service'
+import {
+  isSceneUpdateTopic,
+  isSlowBackfillChannel,
+  isTransformBackfillChannel,
+  isTransformTopic,
+} from './topic-classifier'
+import {
+  copyBinaryPayload,
+  getTransferableBuffers,
+  sanitizePayload,
+} from './transferable-utils'
+import { getTransformBackfillSnapshots } from './transform-backfill-service'
+import {
+  extractTransforms,
+  normalizeFrameId,
+} from './transform-state-accumulator'
+
+export {
+  copyBinaryPayload,
+  getTransferableBuffers,
+  isSlowBackfillChannel,
+  isTransformBackfillChannel,
+  sanitizePayload,
+}
 
 export interface DecodedMessage {
   topic: string
@@ -32,28 +59,6 @@ export interface MessageBatchResult {
   hasMore: boolean
 }
 
-export function isTransformBackfillChannel(topic: string, schemaName: string): boolean {
-  const normalizedTopic = topic.toLowerCase()
-  const normalizedSchema = schemaName.toLowerCase()
-  return normalizedTopic === '/tf'
-    || normalizedTopic === '/tf_static'
-    || normalizedSchema.includes('frametransform')
-    || normalizedSchema.includes('frame_transform')
-    || normalizedSchema.includes('tfmessage')
-    || normalizedSchema.includes('tf_message')
-}
-
-export function isSlowBackfillChannel(topic: string, schemaName: string): boolean {
-  const normalizedSchema = schemaName.toLowerCase()
-  return isTransformBackfillChannel(topic, schemaName)
-    || normalizedSchema.includes('sceneupdate')
-    || normalizedSchema.includes('scene_update')
-    || normalizedSchema.includes('compressedimage')
-    || normalizedSchema.includes('compressed_image')
-    || normalizedSchema.includes('compressedvideo')
-    || normalizedSchema.includes('compressed_video')
-}
-
 function compareDecodedMessages(a: DecodedMessage, b: DecodedMessage): number {
   if (a.logTime !== b.logTime) {
     return a.logTime < b.logTime ? -1 : 1
@@ -69,186 +74,11 @@ interface BufferedMessage {
   dataLength: number
 }
 
-interface BackfillCheckpoint<T> {
-  timeNs: bigint
-  resumeTimeNs: bigint
-  state: T
-  lastMessage: DecodedMessage
-  lastUsed: number
-}
-
-const STATE_CHECKPOINT_INTERVAL_NS = 30_000_000_000n
-const TRANSFORM_CHECKPOINT_INTERVAL_NS = 10_000_000_000n
-const MAX_STATE_CHECKPOINTS_PER_TOPIC = 64
-const MAX_TRANSFORM_CHECKPOINTS_PER_TOPIC = 512
 const MAX_READ_AHEAD_MESSAGES = 64
 const MAX_READ_AHEAD_BYTES = 8 * 1024 * 1024
 const MAX_BATCH_MESSAGES = 256
 const MAX_BATCH_BYTES = 8 * 1024 * 1024
 const MAX_BATCH_WALL_MS = 6
-
-function getSingleTransformChildFrame(payload: any): string {
-  const value = payload?.child_frame_id || payload?.childFrameId
-  return typeof value === 'string' ? value : ''
-}
-
-function getBatchTransformChildFrame(transform: any): string {
-  const value = transform?.child_frame_id || transform?.childFrameId
-  return typeof value === 'string' ? value : ''
-}
-
-class TransformUpdateState {
-  private transformsByChild = new Map<string, any>()
-  private batchTemplate: any = null
-  private usesBatchPayload = false
-
-  clone(): TransformUpdateState {
-    const clone = new TransformUpdateState()
-    clone.transformsByChild = new Map(this.transformsByChild)
-    clone.batchTemplate = this.batchTemplate
-    clone.usesBatchPayload = this.usesBatchPayload
-    return clone
-  }
-
-  apply(payload: any): void {
-    const singleChild = getSingleTransformChildFrame(payload)
-    if (singleChild) {
-      this.transformsByChild.set(singleChild, payload)
-      return
-    }
-    if (!Array.isArray(payload?.transforms)) {
-      return
-    }
-    this.usesBatchPayload = true
-    this.batchTemplate = payload
-    for (const transform of payload.transforms) {
-      const child = getBatchTransformChildFrame(transform)
-      if (child) {
-        this.transformsByChild.set(child, transform)
-      }
-    }
-  }
-
-  toSnapshotMessages(lastMessage: DecodedMessage, seekTimeNs: bigint): DecodedMessage[] {
-    if (this.usesBatchPayload) {
-      return [{
-        ...lastMessage,
-        logTime: seekTimeNs,
-        publishTime: seekTimeNs,
-        dataLength: 0,
-        payload: {
-          ...this.batchTemplate,
-          transforms: Array.from(this.transformsByChild.values()),
-        },
-      }]
-    }
-
-    const transforms = Array.from(this.transformsByChild.values())
-    if (transforms.length === 0) {
-      return [{
-        ...lastMessage,
-        logTime: seekTimeNs,
-        publishTime: seekTimeNs,
-        dataLength: 0,
-      }]
-    }
-    return transforms.map((payload, index) => ({
-      ...lastMessage,
-      logTime: seekTimeNs,
-      publishTime: seekTimeNs,
-      sequence: lastMessage.sequence + index,
-      dataLength: 0,
-      payload,
-    }))
-  }
-}
-
-export function copyBinaryPayload(value: ArrayBufferView): Uint8Array {
-  const source = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
-  const copy = new Uint8Array(source.byteLength)
-  copy.set(source)
-  return copy
-}
-
-export function getTransferableBuffers(messages: readonly DecodedMessage[]): ArrayBuffer[] {
-  const buffers = new Set<ArrayBuffer>()
-
-  for (const { payload } of messages) {
-    for (const value of [payload?.data, payload?.positions, payload?.intensities]) {
-      if (ArrayBuffer.isView(value) && value.buffer instanceof ArrayBuffer) {
-        buffers.add(value.buffer)
-      }
-    }
-  }
-
-  return Array.from(buffers)
-}
-
-export function sanitizePayload(value: any, binaryFormat: 'placeholder' | 'hex' | 'raw' = 'placeholder'): any {
-  if (value === null || value === undefined) {
-    return value
-  }
-
-  if (ArrayBuffer.isView(value)) {
-    const len = value.byteLength
-    const uint8 = new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
-
-    if (binaryFormat === 'hex') {
-      const hexLen = Math.min(len, 64)
-      const bytes = uint8.subarray(0, hexLen)
-      const hexStr = Array.from(bytes)
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join(' ')
-      return `<${value.constructor.name}: ${len} bytes [hex: ${hexStr}${len > 64 ? ' ...' : ''}]>`
-    }
-    else if (binaryFormat === 'raw') {
-      const rawLen = Math.min(len, 64)
-      const bytes = uint8.subarray(0, rawLen)
-      const rawStr = Array.from(bytes).join(', ')
-      return `<${value.constructor.name}: ${len} bytes [values: ${rawStr}${len > 64 ? ' ...' : ''}]>`
-    }
-    else {
-      return `<${value.constructor.name}: ${len} bytes>`
-    }
-  }
-
-  if (Array.isArray(value)) {
-    // Do not truncate scene entities/markers array
-    if (value.length > 512) {
-      return `[Array: ${value.length} items (truncated)]`
-    }
-    return value.map(val => sanitizePayload(val, binaryFormat))
-  }
-
-  if (typeof value === 'object') {
-    const isImage = value.width !== undefined && value.height !== undefined && value.encoding !== undefined && value.data !== undefined
-    const isCompressedImage = value.format !== undefined && value.data !== undefined
-    const isPointCloud = (value.point_step !== undefined || value.point_stride !== undefined || value.fields !== undefined) && value.data !== undefined
-    const isSceneUpdate = value.entities !== undefined || value.cubes !== undefined || value.models !== undefined
-    const isGrid = (value.column_count !== undefined || value.columnCount !== undefined)
-      && (value.row_stride !== undefined || value.rowStride !== undefined)
-      && (value.cell_stride !== undefined || value.cellStride !== undefined)
-      && value.data !== undefined
-
-    const res: any = {}
-    for (const k of Object.keys(value)) {
-      if ((isImage || isCompressedImage || isPointCloud || isSceneUpdate || isGrid) && k === 'data') {
-        // The deserializer can return a view into a reader-owned buffer. Copy it
-        // before transferring ownership to the main thread so the reader remains
-        // usable for later seeks and reads.
-        res[k] = ArrayBuffer.isView(value[k])
-          ? copyBinaryPayload(value[k])
-          : value[k]
-      }
-      else {
-        res[k] = sanitizePayload(value[k], binaryFormat)
-      }
-    }
-    return res
-  }
-
-  return value
-}
 
 export class MessageCursor {
   private reader: McapIndexedReader | null = null
@@ -377,7 +207,14 @@ export class MessageCursor {
       const preparedPointCloud = processor?.type === 'point-cloud'
         ? preparePointCloud(decodedPayload, processor.maxPoints)
         : null
-      payload = preparedPointCloud ?? sanitizePayload(decodedPayload, this.binaryFormat)
+      const renderedPointCloud = preparedPointCloud && processor?.colorMode
+        ? colorizePreparedPointCloud(
+            preparedPointCloud,
+            processor.colorMode,
+            processor.solidColor,
+          )
+        : preparedPointCloud
+      payload = renderedPointCloud ?? sanitizePayload(decodedPayload, this.binaryFormat)
     }
     catch (err: any) {
       payload = { error: err.message || 'Deserialization error' }
@@ -402,73 +239,7 @@ export class MessageCursor {
       return this.deserializerCache.get(channelId)!
     }
 
-    const channel = this.reader.channelsById.get(channelId)
-    if (!channel) {
-      return (data: Uint8Array) => data
-    }
-
-    const schema = this.reader.schemasById.get(channel.schemaId)
-    if (!schema) {
-      const fallback = (data: Uint8Array) => ({
-        hex: Array.from(data.subarray(0, 32))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join(' '),
-      })
-      this.deserializerCache.set(channelId, fallback)
-      return fallback
-    }
-
-    let deserializer: (data: Uint8Array) => any = data => data
-
-    try {
-      if (schema.encoding === 'protobuf') {
-        const root = protobuf.Root.fromDescriptor(schema.data)
-        const type = root.lookupType(schema.name)
-        deserializer = (data) => {
-          const decoded = type.decode(data)
-          return type.toObject(decoded, {
-            longs: String,
-            enums: String,
-            bytes: Object,
-          })
-        }
-      }
-      else if (schema.encoding === 'json') {
-        const decoder = new TextDecoder('utf-8')
-        deserializer = (data) => {
-          try {
-            return JSON.parse(decoder.decode(data))
-          }
-          catch {
-            return { error: 'Failed to parse JSON message' }
-          }
-        }
-      }
-      else {
-        const schemaText = new TextDecoder().decode(schema.data)
-
-        if (schema.encoding === 'ros1msg') {
-          const parsedDefs = parse(schemaText)
-          const reader = new Ros1Reader(parsedDefs)
-          deserializer = data => reader.readMessage(data)
-        }
-        else if (schema.encoding === 'cdr' || schema.encoding === 'ros2msg') {
-          const parsedDefs = parse(schemaText, { ros2: true })
-          const reader = new Ros2Reader(parsedDefs)
-          deserializer = data => reader.readMessage(data)
-        }
-      }
-    }
-    catch (e) {
-      console.error('Failed to parse or compile schema:', e)
-      deserializer = data => ({
-        error: 'Deserialization failed',
-        hex: Array.from(data.subarray(0, 32))
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join(' '),
-      })
-    }
-
+    const deserializer = createMessageDeserializer(this.reader, channelId)
     this.deserializerCache.set(channelId, deserializer)
     return deserializer
   }
@@ -603,249 +374,6 @@ export class MessageCursor {
       || schemaName.includes('tfmessage')
   }
 
-  private isSceneUpdateTopic(topic: string): boolean {
-    if (!this.reader) {
-      return false
-    }
-    return Array.from(this.reader.channelsById.values()).some((channel) => {
-      if (channel.topic !== topic) {
-        return false
-      }
-      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
-      return schemaName.includes('sceneupdate') || schemaName.includes('scene_update')
-    })
-  }
-
-  private isTransformTopic(topic: string): boolean {
-    if (!this.reader) {
-      return false
-    }
-    const normalizedTopic = topic.toLowerCase()
-    if (normalizedTopic === '/tf' || normalizedTopic === '/tf_static') {
-      return true
-    }
-    return Array.from(this.reader.channelsById.values()).some((channel) => {
-      if (channel.topic !== topic) {
-        return false
-      }
-      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
-      return schemaName.includes('frametransform')
-        || schemaName.includes('frame_transform')
-        || schemaName.includes('tfmessage')
-        || schemaName.includes('tf_message')
-    })
-  }
-
-  private findCheckpoint<T>(
-    cache: Map<string, BackfillCheckpoint<T>[]>,
-    topic: string,
-    seekTimeNs: bigint,
-  ): BackfillCheckpoint<T> | undefined {
-    let nearest: BackfillCheckpoint<T> | undefined
-    for (const checkpoint of cache.get(topic) || []) {
-      if (
-        checkpoint.timeNs <= seekTimeNs
-        && (!nearest || checkpoint.timeNs > nearest.timeNs)
-      ) {
-        nearest = checkpoint
-      }
-    }
-    if (nearest) {
-      nearest.lastUsed = ++this.checkpointAccess
-    }
-    return nearest
-  }
-
-  private storeCheckpoint<T>(
-    cache: Map<string, BackfillCheckpoint<T>[]>,
-    topic: string,
-    checkpoint: Omit<BackfillCheckpoint<T>, 'lastUsed'>,
-    maxCheckpoints = MAX_STATE_CHECKPOINTS_PER_TOPIC,
-  ): void {
-    let checkpoints = cache.get(topic)
-    if (!checkpoints) {
-      checkpoints = []
-      cache.set(topic, checkpoints)
-    }
-    const existingIndex = checkpoints.findIndex(item => item.timeNs === checkpoint.timeNs)
-    const next = { ...checkpoint, lastUsed: ++this.checkpointAccess }
-    if (existingIndex >= 0) {
-      checkpoints[existingIndex] = next
-      return
-    }
-    checkpoints.push(next)
-    if (checkpoints.length <= maxCheckpoints) {
-      return
-    }
-    let leastRecentlyUsedIndex = 0
-    for (let index = 1; index < checkpoints.length; index++) {
-      if (checkpoints[index].lastUsed < checkpoints[leastRecentlyUsedIndex].lastUsed) {
-        leastRecentlyUsedIndex = index
-      }
-    }
-    checkpoints.splice(leastRecentlyUsedIndex, 1)
-  }
-
-  private async getSceneBackfillSnapshot(
-    topic: string,
-    seekTimeNs: bigint,
-    isCanceled: () => boolean,
-  ): Promise<DecodedMessage[]> {
-    if (!this.reader) {
-      return []
-    }
-    const checkpoint = this.findCheckpoint(this.sceneCheckpoints, topic, seekTimeNs)
-    const state = checkpoint?.state.clone() || new SceneUpdateState()
-    let lastMessage = checkpoint?.lastMessage
-    let lastCheckpointTimeNs = checkpoint?.timeNs
-    const iterator = this.reader.readMessages({
-      ...(checkpoint ? { startTime: checkpoint.resumeTimeNs } : {}),
-      endTime: seekTimeNs + 1n,
-      topics: [topic],
-    })
-
-    for await (const rawMessage of iterator) {
-      if (isCanceled()) {
-        return []
-      }
-      const decoded = this.decodeMessage(rawMessage)
-      if (!decoded) {
-        continue
-      }
-      if (
-        lastMessage
-        && lastCheckpointTimeNs !== undefined
-        && decoded.logTime > lastMessage.logTime
-        && decoded.logTime - lastCheckpointTimeNs >= STATE_CHECKPOINT_INTERVAL_NS
-      ) {
-        const boundaryTimeNs = decoded.logTime > 0n ? decoded.logTime - 1n : 0n
-        this.storeCheckpoint(this.sceneCheckpoints, topic, {
-          timeNs: boundaryTimeNs,
-          resumeTimeNs: decoded.logTime,
-          state: state.clone(),
-          lastMessage,
-        })
-        lastCheckpointTimeNs = boundaryTimeNs
-      }
-      state.applyMutation(decoded.payload, decoded.logTime)
-      lastMessage = decoded
-      lastCheckpointTimeNs ??= decoded.logTime
-    }
-
-    if (!lastMessage || isCanceled()) {
-      return []
-    }
-    state.advanceTo(seekTimeNs)
-    this.storeCheckpoint(this.sceneCheckpoints, topic, {
-      timeNs: seekTimeNs,
-      resumeTimeNs: seekTimeNs + 1n,
-      state: state.clone(),
-      lastMessage,
-    })
-    return [{
-      ...lastMessage,
-      logTime: seekTimeNs,
-      publishTime: seekTimeNs,
-      dataLength: 0,
-      payload: state.toFullUpdate(seekTimeNs),
-      sceneSnapshot: true,
-    }]
-  }
-
-  private async getTransformBackfillSnapshots(
-    topics: readonly string[],
-    seekTimeNs: bigint,
-    isCanceled: () => boolean,
-  ): Promise<DecodedMessage[]> {
-    if (!this.reader || topics.length === 0) {
-      return []
-    }
-
-    const uniqueTopics = Array.from(new Set(topics))
-    const topicStates = new Map(uniqueTopics.map((topic) => {
-      const checkpoint = this.findCheckpoint(this.transformCheckpoints, topic, seekTimeNs)
-      return [topic, {
-        checkpoint,
-        state: checkpoint?.state.clone() || new TransformUpdateState(),
-        lastMessage: checkpoint?.lastMessage,
-        lastCheckpointTimeNs: checkpoint?.timeNs,
-      }]
-    }))
-    const checkpointResumeTimes = Array.from(topicStates.values())
-      .map(({ checkpoint }) => checkpoint?.resumeTimeNs)
-    const canShareCheckpointStart = checkpointResumeTimes.every(
-      (resumeTimeNs): resumeTimeNs is bigint => resumeTimeNs !== undefined,
-    )
-    const sharedStartTimeNs = canShareCheckpointStart
-      ? checkpointResumeTimes.reduce((earliest, current) => current < earliest ? current : earliest)
-      : undefined
-
-    // TF topics are generally interleaved in the same MCAP chunks. Reading all
-    // of them through one iterator avoids decompressing those chunks once per
-    // topic, which is especially costly during the first seek.
-    const iterator = this.reader.readMessages({
-      ...(sharedStartTimeNs !== undefined ? { startTime: sharedStartTimeNs } : {}),
-      endTime: seekTimeNs + 1n,
-      topics: uniqueTopics,
-    })
-
-    for await (const rawMessage of iterator) {
-      if (isCanceled()) {
-        return []
-      }
-      const topic = this.reader.channelsById.get(rawMessage.channelId)?.topic
-      const topicState = topic ? topicStates.get(topic) : undefined
-      if (!topic || !topicState) {
-        continue
-      }
-      if (topicState.checkpoint && rawMessage.logTime < topicState.checkpoint.resumeTimeNs) {
-        continue
-      }
-      const decoded = this.decodeMessage(rawMessage)
-      if (!decoded) {
-        continue
-      }
-      if (
-        topicState.lastMessage
-        && topicState.lastCheckpointTimeNs !== undefined
-        && decoded.logTime > topicState.lastMessage.logTime
-        && decoded.logTime - topicState.lastCheckpointTimeNs >= TRANSFORM_CHECKPOINT_INTERVAL_NS
-      ) {
-        const boundaryTimeNs = decoded.logTime > 0n ? decoded.logTime - 1n : 0n
-        this.storeCheckpoint(this.transformCheckpoints, topic, {
-          timeNs: boundaryTimeNs,
-          resumeTimeNs: decoded.logTime,
-          state: topicState.state.clone(),
-          lastMessage: topicState.lastMessage,
-        }, MAX_TRANSFORM_CHECKPOINTS_PER_TOPIC)
-        topicState.lastCheckpointTimeNs = boundaryTimeNs
-      }
-      topicState.state.apply(decoded.payload)
-      topicState.lastMessage = decoded
-      topicState.lastCheckpointTimeNs ??= decoded.logTime
-    }
-
-    if (isCanceled()) {
-      return []
-    }
-
-    const messages: DecodedMessage[] = []
-    for (const topic of uniqueTopics) {
-      const topicState = topicStates.get(topic)!
-      if (!topicState.lastMessage) {
-        continue
-      }
-      this.storeCheckpoint(this.transformCheckpoints, topic, {
-        timeNs: seekTimeNs,
-        resumeTimeNs: seekTimeNs + 1n,
-        state: topicState.state.clone(),
-        lastMessage: topicState.lastMessage,
-      }, MAX_TRANSFORM_CHECKPOINTS_PER_TOPIC)
-      messages.push(...topicState.state.toSnapshotMessages(topicState.lastMessage, seekTimeNs))
-    }
-    return messages
-  }
-
   async prewarmTransformCheckpoints(
     topics: readonly string[],
     endTimeNs: bigint,
@@ -854,7 +382,82 @@ export class MessageCursor {
     if (!this.reader || topics.length === 0 || isCanceled()) {
       return
     }
-    await this.getTransformBackfillSnapshots(topics, endTimeNs, isCanceled)
+    await getTransformBackfillSnapshots({
+      reader: this.reader,
+      topics,
+      seekTimeNs: endTimeNs,
+      transformCheckpoints: this.transformCheckpoints,
+      getAccessCount: () => ++this.checkpointAccess,
+      decodeMessage: rawMsg => this.decodeMessage(rawMsg),
+      isCanceled,
+      pinCheckpoints: true,
+    })
+  }
+
+  /**
+   * Reuses the load-time spatial scan to build exact, recording-wide seek
+   * checkpoints. The previous implementation scanned all TF messages only for
+   * frame IDs and discarded the accumulated state, forcing the first seek to
+   * repeat the same work.
+   */
+  async buildSpatialSeekIndex(
+    endTimeNs: bigint,
+    isCanceled: () => boolean = () => false,
+  ): Promise<string[]> {
+    if (!this.reader || isCanceled()) {
+      return []
+    }
+
+    const allTopics = Array.from(new Set(
+      Array.from(this.reader.channelsById.values(), channel => channel.topic),
+    ))
+    const transformTopics = allTopics.filter(topic => isTransformTopic(this.reader, topic))
+    const transformMessages = await getTransformBackfillSnapshots({
+      reader: this.reader,
+      topics: transformTopics,
+      seekTimeNs: endTimeNs,
+      transformCheckpoints: this.transformCheckpoints,
+      getAccessCount: () => ++this.checkpointAccess,
+      decodeMessage: rawMsg => this.decodeMessage(rawMsg),
+      isCanceled,
+      pinCheckpoints: true,
+    })
+    if (isCanceled()) {
+      return []
+    }
+
+    const frameIds = new Set<string>()
+    for (const message of transformMessages) {
+      for (const transform of extractTransforms(message.payload)) {
+        const parent = normalizeFrameId(transform.parentFrameId)
+        const child = normalizeFrameId(transform.childFrameId)
+        if (parent) {
+          frameIds.add(parent)
+        }
+        if (child) {
+          frameIds.add(child)
+        }
+      }
+    }
+
+    const sceneTopics = allTopics.filter(topic => isSceneUpdateTopic(this.reader, topic))
+    for (const topic of sceneTopics) {
+      await getSceneBackfillSnapshot({
+        reader: this.reader,
+        topic,
+        seekTimeNs: endTimeNs,
+        sceneCheckpoints: this.sceneCheckpoints,
+        getAccessCount: () => ++this.checkpointAccess,
+        decodeMessage: rawMsg => this.decodeMessage(rawMsg),
+        isCanceled,
+        pinCheckpoints: true,
+      })
+      if (isCanceled()) {
+        return []
+      }
+    }
+
+    return Array.from(frameIds).sort()
   }
 
   async getBackfillMessages(
@@ -870,28 +473,37 @@ export class MessageCursor {
     this.binaryFormat = binaryFormat
 
     const messages: DecodedMessage[] = []
-    const sceneUpdateTopics = topics.filter(topic => this.isSceneUpdateTopic(topic))
-    const transformTopics = topics.filter(topic => this.isTransformTopic(topic))
+    const sceneUpdateTopics = topics.filter(topic => isSceneUpdateTopic(this.reader, topic))
+    const transformTopics = topics.filter(topic => isTransformTopic(this.reader, topic))
     const statefulTopics = new Set([...sceneUpdateTopics, ...transformTopics])
     const topicsRemaining = new Set(topics.filter(topic => !statefulTopics.has(topic)))
 
     // Rebuild SceneUpdate state in the worker and return one full replacement
     // instead of transferring every historical mutation to the main thread.
     for (const topic of sceneUpdateTopics) {
-      messages.push(...await this.getSceneBackfillSnapshot(topic, seekTimeNs, isCanceled))
+      messages.push(...await getSceneBackfillSnapshot({
+        reader: this.reader,
+        topic,
+        seekTimeNs,
+        sceneCheckpoints: this.sceneCheckpoints,
+        getAccessCount: () => ++this.checkpointAccess,
+        decodeMessage: rawMsg => this.decodeMessage(rawMsg),
+        isCanceled,
+      }))
       if (isCanceled()) {
         return []
       }
     }
 
-    const transformMessages = await this.getTransformBackfillSnapshots(
-      transformTopics,
+    const transformMessages = await getTransformBackfillSnapshots({
+      reader: this.reader,
+      topics: transformTopics,
       seekTimeNs,
+      transformCheckpoints: this.transformCheckpoints,
+      getAccessCount: () => ++this.checkpointAccess,
+      decodeMessage: rawMsg => this.decodeMessage(rawMsg),
       isCanceled,
-    )
-    if (isCanceled()) {
-      return []
-    }
+    })
     if (transformMessages.length > 0) {
       transformMessages[0].transformSnapshot = true
       messages.push(...transformMessages)

@@ -21,14 +21,14 @@ export default function PanelTab({
   }, [api])
 
   return (
-    <div className="mcap-panel-tab" title={title}>
+    <div className="group flex w-full h-full min-w-0 items-center gap-1.5 px-2 py-0.5" title={title}>
       <PanelTypeIcon
         type={instance?.type ?? ''}
         fallbackTitle={definition?.title}
-        className="mcap-panel-tab__icon"
+        className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground [.dv-active-tab_&]:text-foreground"
         aria-hidden="true"
       />
-      <span className="mcap-panel-tab__title">{title}</span>
+      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-xs font-medium leading-none">{title}</span>
     </div>
   )
 }

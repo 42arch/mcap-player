@@ -37,11 +37,7 @@ export function registerBuiltInSceneRenderers() {
     title: 'Scene Update',
     supportsFrameOverride: true,
     matchChannel: channel => getThreeDTopicKind(channel.schemaName, channel.topic) === 'scene-update' ? 100 : 0,
-    createDefaultSettings: (panelConfig, channel) => ({
-      labelFields: panelConfig.labelFieldsByTopic?.[channel.topic] || [],
-    }),
     loadRenderer: () => import('./scene-update-layer').then(module => ({ default: module.SceneUpdateLayer })),
-    loadSettings: () => import('./scene-update-setting'),
   })
 
   registerSceneRenderer({

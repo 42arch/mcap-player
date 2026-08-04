@@ -1,7 +1,7 @@
 import type { Group, Object3D } from 'three'
 import type { PanelComponentProps, ThreeDPanelConfig } from '@/panels/core/types'
 import { GizmoHelper, GizmoViewport } from '@react-three/drei'
-import { Canvas } from '@react-three/fiber'
+import { Canvas, useThree } from '@react-three/fiber'
 import { Suspense, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { usePanelConfig } from '@/panels/core/panel-context'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -18,6 +18,18 @@ import {
 } from './scene-renderer-registry'
 import { FrameTransformCoordinator } from './tf-coordinator'
 import { isTransformChannel } from './three-d-topic'
+
+function SceneInvalidationBridge({ tfCoordinator }: { tfCoordinator: FrameTransformCoordinator }) {
+  const invalidate = useThree(state => state.invalidate)
+
+  useEffect(() => {
+    tfCoordinator.setSceneInvalidator(invalidate)
+    invalidate()
+    return () => tfCoordinator.setSceneInvalidator(null)
+  }, [invalidate, tfCoordinator])
+
+  return null
+}
 
 // Helper to determine if a hex color is light or dark
 function isLightHexColor(hex: string): boolean {
@@ -60,6 +72,8 @@ export default function ThreeDPanel({ panelId }: PanelComponentProps<ThreeDPanel
     [fileSummary?.channels],
   )
   const fixedFrameSetting = threeDSettings.fixedFrame || 'auto'
+  const displayFrame = threeDSettings.displayFrame || 'map'
+  const followMode = threeDSettings.followMode || 'follow-position'
   const resolvedFixedFrame = useSyncExternalStore(
     tfCoordinator.subscribe,
     tfCoordinator.getFixedFrameSnapshot,
@@ -101,25 +115,29 @@ export default function ThreeDPanel({ panelId }: PanelComponentProps<ThreeDPanel
     >
       <div className="flex-1 w-full h-full">
         <Canvas
-          camera={{ position: [-15, -15, 12], fov: 50, up: [0, 0, 1] }}
+          frameloop="demand"
+          camera={{ position: [-15, -15, 12], fov: 50, near: 0.1, far: 5000, up: [0, 0, 1] }}
           gl={{ antialias: true, alpha: false }}
           className="w-full h-full"
         >
+          <SceneInvalidationBridge tfCoordinator={tfCoordinator} />
           <color attach="background" args={[bgColor]} />
           <ambientLight intensity={0.8} />
           <directionalLight position={[10, 20, 15]} intensity={1.0} />
 
           <CameraControls
             contentRef={sceneContentRef}
+            displayFrame={displayFrame}
             focusRef={cameraFocusRef}
             focusKey={cameraFocusKey}
+            followMode={followMode}
+            tfCoordinator={tfCoordinator}
             waitForFrame={Boolean(resolvedFixedFrame) || canFrameWithoutTransforms}
           />
           <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
             <GizmoViewport
               axisColors={isLightBg ? ['#dc2626', '#16a34a', '#2563eb'] : ['#f87171', '#4ade80', '#22d3ee']}
               labelColor={isLightBg ? '#334155' : '#e2e8f0'}
-              hideNegativeAxes
             />
           </GizmoHelper>
 
@@ -170,6 +188,14 @@ export default function ThreeDPanel({ panelId }: PanelComponentProps<ThreeDPanel
           Z-up · Fixed:
           {' '}
           {resolvedFixedFrame || 'local (waiting for transforms)'}
+          {' '}
+          · Display:
+          {' '}
+          {displayFrame}
+          {' '}
+          · Follow:
+          {' '}
+          {followMode.replace('follow-', '')}
           {' '}
           ·
           {' '}

@@ -1,5 +1,3 @@
-import { getSceneEntityLabel } from './scene-labels'
-
 export type Vector3Tuple = [number, number, number]
 export type QuaternionTuple = [number, number, number, number]
 export type ColorTuple = [number, number, number, number]
@@ -84,10 +82,6 @@ interface StoredEntity {
   expiresAtNs: bigint | null
 }
 
-export interface SceneUpdateParseOptions {
-  labelFields?: readonly string[]
-}
-
 export function createEmptySceneUpdate(): ParsedSceneUpdate {
   return {
     arrows: [],
@@ -144,9 +138,9 @@ export class SceneUpdateState {
     return clone
   }
 
-  apply(payload: any, logTimeNs: bigint, options?: SceneUpdateParseOptions): ParsedSceneUpdate {
+  apply(payload: any, logTimeNs: bigint): ParsedSceneUpdate {
     this.applyMutation(payload, logTimeNs)
-    return this.snapshot(options)
+    return this.snapshot()
   }
 
   applyMutation(payload: any, logTimeNs: bigint): void {
@@ -209,10 +203,9 @@ export class SceneUpdateState {
     }
   }
 
-  snapshot(options?: SceneUpdateParseOptions): ParsedSceneUpdate {
+  snapshot(): ParsedSceneUpdate {
     return parseSceneUpdate(
       { entities: Array.from(this.entities.values(), entry => entry.entity) },
-      options,
     )
   }
 
@@ -283,7 +276,7 @@ function parseIndices(indices: unknown): number[] {
   return Array.isArray(indices) ? indices.map(index => Number(index)) : []
 }
 
-export function parseSceneUpdate(payload: any, options: SceneUpdateParseOptions = {}): ParsedSceneUpdate {
+export function parseSceneUpdate(payload: any): ParsedSceneUpdate {
   const scene = createEmptySceneUpdate()
 
   if (!payload || !Array.isArray(payload.entities)) {
@@ -293,7 +286,6 @@ export function parseSceneUpdate(payload: any, options: SceneUpdateParseOptions 
   for (const entity of payload.entities) {
     const entityId = entity.id || 'entity'
     const frameId = entity.frame_id || 'base_link'
-    const entityLabel = getSceneEntityLabel(entity, options.labelFields || [])
     let category: string | undefined
     if (Array.isArray(entity.metadata)) {
       const categoryMetadata = entity.metadata.find((metadata: any) => metadata.key === 'category')
@@ -325,21 +317,6 @@ export function parseSceneUpdate(payload: any, options: SceneUpdateParseOptions 
         category,
         frameId,
       })
-      if (entityLabel) {
-        scene.texts.push({
-          id: `${entityId}-derived-label-${index}`,
-          position: [pose.position[0], pose.position[1], pose.position[2] + size[2] / 2 + 0.3],
-          orientation: [0, 0, 0, 1],
-          text: entityLabel,
-          fontSize: 0.55,
-          billboard: true,
-          scaleInvariant: true,
-          hasBackground: true,
-          screenSize: 22,
-          color: [1, 1, 1, 1],
-          frameId,
-        })
-      }
     }
 
     for (const [index, sphere] of (entity.spheres || []).entries()) {

@@ -1,5 +1,6 @@
 import type { DispatchModeByTopic } from './message-cursor'
 import type { PlotSeriesData, PlotSeriesRequest } from './plot-data'
+import type { BackfillClass } from './topic-classifier'
 import type { MessageProcessorByTopic } from '@/core/message-processing'
 import { Buffer } from 'buffer/'
 import { BlobReadable } from '@mcap/browser'
@@ -10,14 +11,17 @@ import { isH264Format } from '@/core/parsers/h264'
 import { createNumericValueAccessor } from '@/core/parsers/value-extractor'
 import {
   getTransferableBuffers,
-  isSlowBackfillChannel,
-  isTransformBackfillChannel,
   MessageCursor,
 } from './message-cursor'
 import { DEFAULT_MAX_PLOT_POINTS_PER_SERIES, PlotSeriesAccumulator } from './plot-data'
 import { collectTimelineData } from './timeline-data'
+import { getBackfillClass } from './topic-classifier'
 
-type BackfillPhase = 'all' | 'fast' | 'slow'
+type BackfillPhase = 'all' | BackfillClass
+
+interface InitializeOptions {
+  buildSpatialIndex?: boolean
+}
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0))
@@ -44,14 +48,10 @@ class McapWorker {
   private activePlotRequestIds = new Set<number>()
   private canceledPlotRequestIds = new Set<number>()
   private timelineGeneration = 0
-  private transformPrewarmGeneration = 0
-  private transformPrewarmTopicsKey = ''
 
-  async initialize(file: File) {
+  async initialize(file: File, options: InitializeOptions = {}) {
     this.activePlotRequestIds.forEach(requestId => this.canceledPlotRequestIds.add(requestId))
     this.timelineGeneration++
-    this.transformPrewarmGeneration++
-    this.transformPrewarmTopicsKey = ''
     if (!this.decompressHandlers) {
       this.decompressHandlers = await loadDecompressHandlers()
     }
@@ -140,6 +140,9 @@ class McapWorker {
 
     channelsList.sort((a, b) => a.topic.localeCompare(b.topic))
     const durationNs = endNs - startNs
+    const frameIds = options.buildSpatialIndex === false
+      ? []
+      : await this.cursor.buildSpatialSeekIndex(endNs > -1n ? endNs : 0n)
 
     return {
       name: file.name,
@@ -150,6 +153,7 @@ class McapWorker {
       durationNs: durationNs > 0n ? durationNs : 0n,
       startNs: startNs > -1n ? startNs : 0n,
       endNs: endNs > -1n ? endNs : 0n,
+      frameIds,
     }
   }
 
@@ -199,7 +203,7 @@ class McapWorker {
     const isCanceled = () => seekGeneration !== undefined && seekGeneration !== this.latestSeekGeneration
     const selectedTopics = phase === 'all'
       ? topics
-      : topics.filter(topic => this.isSlowBackfillTopic(topic) === (phase === 'slow'))
+      : topics.filter(topic => this.getBackfillClass(topic) === phase)
 
     const messages = await this.cursor.getBackfillMessages(
       seekTimeNs,
@@ -217,75 +221,27 @@ class McapWorker {
       this.lastDispatchModes = ''
       this.lastEndTimeNs = seekTimeNs
     }
-    if (phase !== 'fast') {
-      this.scheduleTransformPrewarm(selectedTopics)
-    }
     return transfer(messages, getTransferableBuffers(messages))
   }
 
   setSeekGeneration(generation: number) {
     if (generation > this.latestSeekGeneration) {
       this.latestSeekGeneration = generation
-      this.transformPrewarmGeneration++
-      this.transformPrewarmTopicsKey = ''
     }
   }
 
-  private scheduleTransformPrewarm(topics: readonly string[]): void {
+  private getBackfillClass(topic: string): BackfillClass {
     if (!this.reader) {
-      return
+      return 'fast'
     }
-    const transformTopics = Array.from(new Set(topics.filter(topic => this.isTransformTopic(topic)))).sort()
-    const endTimeNs = this.reader.statistics?.messageEndTime
-    if (transformTopics.length === 0 || endTimeNs === undefined) {
-      return
-    }
-    const topicsKey = transformTopics.join('\n')
-    if (topicsKey === this.transformPrewarmTopicsKey) {
-      return
-    }
-    this.transformPrewarmTopicsKey = topicsKey
-    const generation = ++this.transformPrewarmGeneration
-    setTimeout(() => {
-      if (generation !== this.transformPrewarmGeneration) {
-        return
-      }
-      void this.cursor.prewarmTransformCheckpoints(
-        transformTopics,
-        endTimeNs,
-        () => generation !== this.transformPrewarmGeneration,
-      ).catch((error: unknown) => {
-        if (generation === this.transformPrewarmGeneration) {
-          console.warn('Failed to prewarm TF seek checkpoints:', error)
-        }
-      })
-    }, 0)
-  }
-
-  private isSlowBackfillTopic(topic: string): boolean {
-    if (!this.reader) {
-      return false
-    }
-    return Array.from(this.reader.channelsById.values()).some((channel) => {
+    for (const channel of this.reader.channelsById.values()) {
       if (channel.topic !== topic) {
-        return false
+        continue
       }
       const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name?.toLowerCase() || ''
-      return isSlowBackfillChannel(topic, schemaName)
-    })
-  }
-
-  private isTransformTopic(topic: string): boolean {
-    if (!this.reader) {
-      return false
+      return getBackfillClass(topic, schemaName)
     }
-    return Array.from(this.reader.channelsById.values()).some((channel) => {
-      if (channel.topic !== topic) {
-        return false
-      }
-      const schemaName = this.reader?.schemasById.get(channel.schemaId)?.name || ''
-      return isTransformBackfillChannel(topic, schemaName)
-    })
+    return 'fast'
   }
 
   async getFirstMessagePayload(topic: string) {

@@ -35,7 +35,6 @@ const unitEdgesGeo = new THREE.EdgesGeometry(unitBoxGeo)
 const boxMaterialCache = new Map<string, THREE.MeshStandardMaterial>()
 const lineMaterialCache = new Map<string, THREE.LineBasicMaterial>()
 const textTextureCache = new Map<string, { texture: THREE.CanvasTexture, references: number }>()
-const emptyLabelFields: string[] = []
 
 function getBoxMaterial(colorHex: string, alpha: number): THREE.MeshStandardMaterial {
   const key = `${colorHex}-${alpha.toFixed(2)}`
@@ -754,19 +753,11 @@ export function SceneUpdateLayer({
   const isFocusTarget = isPreferredSceneFocusTopic(topic)
   const [scene, setScene] = useState<ParsedSceneUpdate>(createEmptySceneUpdate)
   const [adapterFrameId, setAdapterFrameId] = useState<string | null>(null)
-  const labelFields = useMemo(
-    () => Array.isArray(settings.labelFields)
-      ? settings.labelFields.filter((field): field is string => typeof field === 'string')
-      : emptyLabelFields,
-    [settings.labelFields],
-  )
   const pendingUpdatesRef = useRef<PendingSceneUpdate[]>([])
   const frameOverride = getSceneLayerFrameOverride(settings)
   const sceneStateRef = useRef(new SceneUpdateState())
   const rafIdRef = useRef<number | null>(null)
   const receivedSinceSeekRef = useRef(true)
-  const labelFieldsRef = useRef(labelFields)
-  labelFieldsRef.current = labelFields
 
   const sceneByFrame = useMemo(() => splitSceneByFrame(scene), [scene])
 
@@ -796,7 +787,7 @@ export function SceneUpdateLayer({
               sceneStateRef.current.applyMutation(update.payload, update.logTimeNs)
             }
           }
-          setScene(sceneStateRef.current.snapshot({ labelFields: labelFieldsRef.current }))
+          setScene(sceneStateRef.current.snapshot())
         }
       })
     }
@@ -856,9 +847,6 @@ export function SceneUpdateLayer({
     }
   }, [adapter, channel, panelId, topic])
 
-  useEffect(() => {
-    setScene(sceneStateRef.current.snapshot({ labelFields }))
-  }, [labelFields])
 
   return (
     <group>
