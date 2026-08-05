@@ -2,16 +2,16 @@ import type UPlot from 'uplot'
 import type { UPlotChartHandle, UPlotChartOptions } from '@/components/common/uplot-chart'
 import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { PanelComponentProps, PlotPanelConfig } from '@/panels/core/types'
-import { Loader2 } from 'lucide-react'
+import { ChevronRight, Eye, EyeClosed, Layers, Loader2 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import UPlotChart from '@/components/common/uplot-chart'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { getPlaybackElapsedNs, subscribePlaybackTime } from '@/core/playback-time-store'
 import { cancelFrame, scheduleFrame } from '@/core/raf-scheduler'
+import { cn } from '@/lib/utils'
 import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
 import { usePlayerStore } from '@/stores/use-player-store'
-import 'uplot/dist/uPlot.min.css'
 
 // Helper function to merge multiple series data sets into one aligned time series
 function mergeTimeSeries(datasets: Array<Pick<PlotSeriesData, 'times' | 'values'>>): uPlot.AlignedData {
@@ -64,12 +64,27 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
   const defaultYRangeRef = useRef<{ min: number, max: number } | null>(null)
 
   const [loadingData, setLoadingData] = useState(false)
+  const [hiddenSeriesIds, setHiddenSeriesIds] = useState<Set<string>>(() => new Set())
+  const [legendExpanded, setLegendExpanded] = useState(true)
 
   // Filter series that are fully configured with topic and path
   const activeSeries = useMemo(
     () => plotSeries.filter(s => s.topic && s.path),
     [plotSeries],
   )
+
+  const toggleSeriesVisibility = useCallback((id: string) => {
+    setHiddenSeriesIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      }
+      else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
 
   const emptyChartData = useMemo(
     () => [[], ...Array.from({ length: activeSeries.length }, () => [])] as UPlot.AlignedData,
@@ -207,19 +222,30 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
             return
           }
 
-          const seriesRows = activeSeries.map((s, sIdx) => {
-            const val = u.data[sIdx + 1]?.[idx]
-            const valStr = val == null ? '-' : val.toFixed(4)
-            return `
-              <div class="flex items-center justify-between gap-6">
-                <span class="flex items-center gap-1.5 min-w-0">
-                  <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color: ${s.color}"></span>
-                  <span class="truncate max-w-36 font-semibold" title="${s.topic}.${s.path}">${s.topic}.${s.path}</span>
-                </span>
-                <span class="font-semibold text-right" style="color: ${s.color}">${valStr}</span>
-              </div>
-            `
-          }).join('')
+          const seriesRows = activeSeries
+            .map((s, sIdx) => {
+              if (hiddenSeriesIds.has(s.id)) {
+                return ''
+              }
+              const val = u.data[sIdx + 1]?.[idx]
+              const valStr = val == null ? '-' : val.toFixed(4)
+              return `
+                <div class="flex items-center justify-between gap-6">
+                  <span class="flex items-center gap-1.5 min-w-0">
+                    <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color: ${s.color}"></span>
+                    <span class="truncate max-w-36 font-semibold" title="${s.topic}.${s.path}">${s.name || s.path}</span>
+                  </span>
+                  <span class="font-semibold text-right" style="color: ${s.color}">${valStr}</span>
+                </div>
+              `
+            })
+            .filter(Boolean)
+            .join('')
+
+          if (!seriesRows) {
+            tooltipEl.style.display = 'none'
+            return
+          }
 
           tooltipEl.innerHTML = `
             <div class="border-b border-border/40 pb-1 mb-1 font-semibold text-foreground">
@@ -290,6 +316,7 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
           value: (_, v) => (v == null ? '-' : `${v.toFixed(2)}s`),
         },
         ...activeSeries.map(s => ({
+          show: !hiddenSeriesIds.has(s.id),
           label: s.name || s.path,
           stroke: s.color,
           width: s.lineWidth || 2,
@@ -299,7 +326,7 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
       ],
       plugins: [timeMarkerPlugin, tooltipPlugin],
     }
-  }, [activeSeries, fileSummary, resolvedTheme])
+  }, [activeSeries, fileSummary, hiddenSeriesIds, resolvedTheme])
 
   const handleChartData = useCallback((uplot: UPlot) => {
     const yScale = uplot.scales.y
@@ -347,18 +374,7 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 bg-card overflow-hidden">
-      <PanelContentHeader
-        actions={activeSeries.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            {activeSeries.map(s => (
-              <div key={s.id} className="flex shrink-0 items-center gap-1.5 rounded-md border border-border/50 bg-muted/50 px-2 py-0.5 font-mono text-[9px] text-muted-foreground">
-                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }}></span>
-                <span className="font-bold">{s.name}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      />
+      <PanelContentHeader />
 
       {/* Chart Container Body */}
       <div className="flex-1 min-h-0 relative p-4 flex items-center justify-center bg-background overflow-hidden">
@@ -366,6 +382,84 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
           <div className="absolute inset-0 bg-background/50 flex flex-col items-center justify-center z-10 text-muted-foreground select-none">
             <Loader2 className="w-6 h-6 animate-spin text-primary mb-2" />
             <p className="text-[10px] font-semibold">Extracting optimized datasets...</p>
+          </div>
+        )}
+
+        {/* Floating Vertical Legend Overlay */}
+        {activeSeries.length > 0 && (
+          <div className="absolute top-3 right-3 z-20 select-none font-mono text-[10px]">
+            {legendExpanded ? (
+              <div className="bg-popover/90 border border-border/80 text-popover-foreground rounded-md p-2 shadow-lg backdrop-blur-xs max-w-56 flex flex-col gap-1 transition-all duration-200">
+                <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-1 px-0.5 text-muted-foreground font-semibold">
+                  <span>Legend ({activeSeries.length})</span>
+                  <button
+                    type="button"
+                    onClick={() => setLegendExpanded(false)}
+                    className="p-0.5 hover:bg-muted/80 rounded transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="Collapse Legend"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto pr-0.5">
+                  {activeSeries.map((s) => {
+                    const isHidden = hiddenSeriesIds.has(s.id)
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => toggleSeriesVisibility(s.id)}
+                        className={cn(
+                          'flex items-center justify-between gap-2 px-1.5 py-1 rounded cursor-pointer transition-colors',
+                          isHidden ? 'opacity-40 bg-muted/20 hover:bg-muted/40' : 'hover:bg-muted/60 bg-muted/30',
+                        )}
+                        title={`${s.topic}.${s.path}`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              toggleSeriesVisibility(s.id)
+                            }}
+                            className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                            title={isHidden ? 'Show series' : 'Hide series'}
+                          >
+                            {isHidden ? (
+                              <EyeClosed className="w-3 h-3 text-muted-foreground/60" />
+                            ) : (
+                              <Eye className="w-3 h-3 text-primary" />
+                            )}
+                          </button>
+                          <span
+                            className="w-1.5 h-1.5 rounded-full shrink-0"
+                            style={{ backgroundColor: s.color }}
+                          />
+                          <span className="truncate font-medium">
+                            {s.name || s.path}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setLegendExpanded(true)}
+                className="flex items-center gap-1.5 bg-popover/90 border border-border/80 text-popover-foreground rounded-md px-2 py-1 shadow-md backdrop-blur-xs hover:bg-popover transition-colors cursor-pointer"
+                title="Expand Legend"
+              >
+                <Layers className="w-3 h-3 text-primary" />
+                <span className="font-semibold text-[10px]">Legend</span>
+                {hiddenSeriesIds.size > 0 && (
+                  <span className="bg-primary/20 text-primary text-[9px] px-1 rounded font-bold">
+                    {hiddenSeriesIds.size} hidden
+                  </span>
+                )}
+              </button>
+            )}
           </div>
         )}
 
@@ -398,6 +492,7 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
                       onData={handleChartData}
                       onDoubleClick={handleChartDoubleClick}
                       options={chartOptions}
+                      resetScalesKey={fileSummary?.name}
                       sizePadding={{ height: 8, width: 8 }}
                       wheelZoom={wheelZoom}
                     />
@@ -409,3 +504,4 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
     </div>
   )
 }
+

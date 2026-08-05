@@ -104,7 +104,6 @@ export function registerBuiltInPanels() {
     title: 'Plot Visualizer',
     configVersion: 1,
     createDefaultConfig: () => ({
-      windowSizeSeconds: 15,
       series: [
         {
           id: 'default-series',

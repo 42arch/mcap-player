@@ -123,7 +123,7 @@ function MenubarCheckboxItem({
       checked={checked}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center [&_svg:not([class*='size-'])]:size-4">
+      <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center [&_svg:not([class*='size-'])]:size-3">
         <MenubarPrimitive.ItemIndicator>
           <CheckIcon />
         </MenubarPrimitive.ItemIndicator>
@@ -229,13 +229,13 @@ function MenubarSubTrigger({
       data-slot="menubar-sub-trigger"
       data-inset={inset}
       className={cn(
-        'flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs outline-none select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7.5 data-open:bg-accent data-open:text-accent-foreground [&_svg:not([class*=\'size-\'])]:size-3.5',
+        'flex min-h-7 cursor-default items-center gap-2 rounded-md px-2 py-1 text-xs outline-none select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-inset:pl-7.5 data-open:bg-accent data-open:text-accent-foreground [&_svg:not([class*=\'size-\'])]:size-3',
         className,
       )}
       {...props}
     >
       {children}
-      <ChevronRightIcon className="ml-auto size-4" />
+      <ChevronRightIcon className="ml-auto size-3" />
     </MenubarPrimitive.SubTrigger>
   )
 }

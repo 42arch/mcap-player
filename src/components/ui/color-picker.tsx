@@ -44,7 +44,7 @@ export function ColorPicker({
         onChange={handleHexChange}
         disabled={disabled}
         placeholder="#ffffff"
-        className="h-8 font-mono text-xs uppercase pl-8 w-full"
+        className="font-mono text-[9px] md:text-[9px] uppercase pl-8 w-full"
       />
     </div>
   )

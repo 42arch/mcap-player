@@ -1,5 +1,5 @@
 import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react'
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { cn } from '@/lib/utils'
 
 interface JsonRowProps {
@@ -10,7 +10,7 @@ interface JsonRowProps {
   children: React.ReactNode
 }
 
-function JsonRow({ className, indentClass, onClick, copyText, children }: JsonRowProps) {
+const JsonRow = memo(({ className, indentClass, onClick, copyText, children }: JsonRowProps) => {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -53,7 +53,7 @@ function JsonRow({ className, indentClass, onClick, copyText, children }: JsonRo
       </button>
     </div>
   )
-}
+})
 
 interface JsonNodeProps {
   name?: string | number
@@ -63,7 +63,7 @@ interface JsonNodeProps {
   binaryFormat: 'placeholder' | 'hex' | 'raw'
 }
 
-function JsonNode({ name, value, depth, expandState, binaryFormat }: JsonNodeProps) {
+const JsonNode = memo(({ name, value, depth, expandState, binaryFormat }: JsonNodeProps) => {
   const isObject = value !== null && typeof value === 'object'
   const isArray = Array.isArray(value)
   const [expanded, setExpanded] = useState(() => {
@@ -231,7 +231,7 @@ function JsonNode({ name, value, depth, expandState, binaryFormat }: JsonNodePro
       )}
     </div>
   )
-}
+})
 
 interface MessageViewerProps {
   data: any

@@ -1,5 +1,5 @@
 import type { PanelSettingsProps, ThreeDPanelConfig } from '@/panels/core/types'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeClosed } from 'lucide-react'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { Button } from '@/components/ui/button'
 import { ColorPicker } from '@/components/ui/color-picker'
@@ -121,7 +121,7 @@ export default function ThreeDSetting({
                     onClick={() => setAllTopicsVisible(!isAnyVisible)}
                     title={isAnyVisible ? 'Hide all layers' : 'Show all layers'}
                   >
-                    {isAnyVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                    {isAnyVisible ? <Eye className="size-3.5" /> : <EyeClosed className="size-3.5" />}
                   </Button>
                 )
               : null
@@ -151,7 +151,7 @@ export default function ThreeDSetting({
                         onClick={() => toggleTopic(channel.topic)}
                         title={isVisible ? 'Hide layer' : 'Show layer'}
                       >
-                        {isVisible ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}
+                        {isVisible ? <Eye className="size-3.5" /> : <EyeClosed className="size-3.5" />}
                       </Button>
                     </div>
                   )

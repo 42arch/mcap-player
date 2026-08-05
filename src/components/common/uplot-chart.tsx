@@ -1,6 +1,7 @@
 import type { Ref } from 'react'
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import UPlot from 'uplot'
+import 'uplot/dist/uPlot.min.css'
 
 export interface UPlotChartHandle {
   getInstance: () => UPlot | null
@@ -16,6 +17,7 @@ export interface UPlotChartProps {
   className?: string
   cursor?: 'crosshair' | 'grab'
   ref?: Ref<UPlotChartHandle>
+  resetScalesKey?: any
   sizePadding?: {
     height?: number
     width?: number
@@ -42,6 +44,7 @@ function UPlotChart({
   onMouseLeave,
   options,
   ref,
+  resetScalesKey,
   sizePadding,
   wheelZoom,
 }: UPlotChartProps) {
@@ -54,7 +57,19 @@ function UPlotChart({
   const onDoubleClickRef = useRef(onDoubleClick)
   const onMouseLeaveRef = useRef(onMouseLeave)
   const wheelZoomRef = useRef(wheelZoom)
+  const savedScalesRef = useRef<{
+    xMin?: number
+    xMax?: number
+    yMin?: number
+    yMax?: number
+  } | null>(null)
+  const resetScalesKeyRef = useRef(resetScalesKey)
   const [layoutReady, setLayoutReady] = useState(false)
+
+  if (resetScalesKeyRef.current !== resetScalesKey) {
+    resetScalesKeyRef.current = resetScalesKey
+    savedScalesRef.current = null
+  }
 
   optionsRef.current = options
   dataRef.current = data
@@ -127,6 +142,18 @@ function UPlotChart({
     }, dataRef.current, container)
     uplotRef.current = chart
 
+    if (savedScalesRef.current) {
+      const { xMin, xMax, yMin, yMax } = savedScalesRef.current
+      chart.batch(() => {
+        if (xMin != null && xMax != null) {
+          chart.setScale('x', { min: xMin, max: xMax })
+        }
+        if (yMin != null && yMax != null) {
+          chart.setScale('y', { min: yMin, max: yMax })
+        }
+      })
+    }
+
     const defaultCursor = cursor
     chart.over.style.cursor = defaultCursor
 
@@ -142,6 +169,17 @@ function UPlotChart({
     const restoreCursor = () => {
       chart.over.style.cursor = defaultCursor
       document.body.style.cursor = previousBodyCursor
+    }
+
+    const saveCurrentScales = () => {
+      if (chart.scales.x?.min != null && chart.scales.x?.max != null) {
+        savedScalesRef.current = {
+          xMin: chart.scales.x.min,
+          xMax: chart.scales.x.max,
+          yMin: chart.scales.y?.min,
+          yMax: chart.scales.y?.max,
+        }
+      }
     }
 
     const handleMouseDown = (event: MouseEvent) => {
@@ -186,6 +224,7 @@ function UPlotChart({
         chart.setScale('x', { min: nextXMin, max: nextXMax })
         chart.setScale('y', { min: nextYMin, max: nextYMax })
       })
+      saveCurrentScales()
     }
 
     const handleMouseUp = (event: MouseEvent) => {
@@ -195,6 +234,7 @@ function UPlotChart({
 
       isDragging = false
       restoreCursor()
+      saveCurrentScales()
 
       if (event.detail > 1) {
         return
@@ -208,6 +248,7 @@ function UPlotChart({
 
     const handleDoubleClick = () => {
       onDoubleClickRef.current?.(chart)
+      saveCurrentScales()
     }
 
     const handleWheel = (event: WheelEvent) => {
@@ -236,6 +277,7 @@ function UPlotChart({
       const cursorRatio = left / plotWidth
       const nextMin = cursorValue - cursorRatio * nextRange
       chart.setScale('x', { min: nextMin, max: nextMin + nextRange })
+      saveCurrentScales()
     }
 
     const handleMouseLeave = () => {
@@ -252,6 +294,7 @@ function UPlotChart({
     onDataRef.current?.(chart)
 
     return () => {
+      saveCurrentScales()
       chart.over.removeEventListener('mousedown', handleMouseDown)
       chart.over.removeEventListener('dblclick', handleDoubleClick)
       chart.over.removeEventListener('wheel', handleWheel)

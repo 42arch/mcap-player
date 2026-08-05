@@ -20,7 +20,6 @@ export interface ImagePanelConfig extends PanelConfig {
 }
 
 export interface PlotPanelConfig extends PanelConfig {
-  windowSizeSeconds: number
   series: PlotSeries[]
   availableFieldsByTopic: Record<string, string[]>
 }

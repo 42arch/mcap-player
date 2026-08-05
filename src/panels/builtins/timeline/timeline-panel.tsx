@@ -24,7 +24,6 @@ import {
 import { formatDuration, formatNanoseconds } from '@/lib/time'
 import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
 import { usePlayerStore } from '@/stores/use-player-store'
-import 'uplot/dist/uPlot.min.css'
 
 const ROW_HEIGHT = 24
 const X_AXIS_HEIGHT = 36
@@ -54,6 +53,26 @@ function formatAxisTime(seconds: number, durationSeconds: number): string {
     return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`
   }
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`
+}
+
+function smartTruncateTopic(topic: string, maxLength: number = 18): string {
+  if (!topic || topic.length <= maxLength) {
+    return topic
+  }
+
+  const parts = topic.split('/')
+  if (parts.length >= 4) {
+    const firstPart = parts[1]
+    const lastPart = parts[parts.length - 1]
+    const condensed = `/${firstPart}/…/${lastPart}`
+    if (condensed.length <= maxLength) {
+      return condensed
+    }
+  }
+
+  const keepHead = Math.floor((maxLength - 1) / 2)
+  const keepTail = maxLength - 1 - keepHead
+  return `${topic.slice(0, keepHead)}…${topic.slice(-keepTail)}`
 }
 
 function TimelineEmptyState({
@@ -169,6 +188,20 @@ export default function TimelinePanel({
     () => visibleTimelineData.map((_, index) => `hsl(${(index * TOPIC_COLOR_GOLDEN_ANGLE) % 360} 72% 50%)`),
     [visibleTimelineData],
   )
+
+  const yAxisWidth = useMemo(() => {
+    if (visibleTimelineData.length === 0) {
+      return 90
+    }
+    const maxCharCount = Math.max(
+      ...visibleTimelineData.map((item) => {
+        const truncated = smartTruncateTopic(item.topic, 18)
+        return truncated.length
+      }),
+    )
+    const estimatedWidth = Math.round(maxCharCount * 6.2 + 14)
+    return Math.min(Math.max(estimatedWidth, 75), 130)
+  }, [visibleTimelineData])
 
   const hideTooltip = useCallback(() => {
     if (tooltipRef.current) {
@@ -351,11 +384,11 @@ export default function TimelinePanel({
           grid: { show: false },
           ticks: { show: false },
           font: '10px monospace',
-          size: 150,
+          size: yAxisWidth,
           splits: topicSplits,
           values: (_u, splits) => splits.map((value) => {
             const topic = visibleTimelineData[Math.round(value)]?.topic ?? ''
-            return topic.length > 24 ? `…${topic.slice(-23)}` : topic
+            return smartTruncateTopic(topic, 18)
           }),
         },
       ],
@@ -368,7 +401,7 @@ export default function TimelinePanel({
       ],
       plugins: [scatterPlugin],
     }
-  }, [durationSeconds, fileSummary, hideTooltip, resolvedTheme, topicColors, topicCount, visibleTimelineData])
+  }, [durationSeconds, fileSummary, hideTooltip, resolvedTheme, topicColors, topicCount, visibleTimelineData, yAxisWidth])
 
   const chartData = useMemo<UPlot.AlignedData>(() => [
     [0, durationSeconds],
@@ -408,21 +441,23 @@ export default function TimelinePanel({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-card">
-      <PanelContentHeader
-        actions={timelineData && (
-          <span className="font-mono text-[10px] text-muted-foreground">
-            {visibleTimelineData.length}
-            {' '}
-            topics ·
-            {' '}
-            {visibleMessageCount.toLocaleString()}
-            {' '}
-            messages
-          </span>
-        )}
-      />
+      <PanelContentHeader />
 
       <div className="relative flex min-h-0 flex-1 bg-background">
+        {timelineData && visibleTimelineData.length > 0 && !showEmptyState && (
+          <div className="absolute top-3 right-3 z-20 pointer-events-none select-none font-mono text-[10px]">
+            <div className="bg-popover/90 border border-border/80 text-muted-foreground px-2 py-1 rounded-md shadow-xs backdrop-blur-xs">
+              {visibleTimelineData.length}
+              {' '}
+              topics ·
+              {' '}
+              {visibleMessageCount.toLocaleString()}
+              {' '}
+              messages
+            </div>
+          </div>
+        )}
+
         {loadingData
           ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">

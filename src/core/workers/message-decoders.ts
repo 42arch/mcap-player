@@ -39,7 +39,11 @@ export function createMessageDeserializer(
       }
     }
 
-    if (schema.encoding === 'json') {
+    if (
+      schema.encoding === 'json'
+      || schema.encoding === 'jsonschema'
+      || channel.messageEncoding === 'json'
+    ) {
       const decoder = new TextDecoder('utf-8')
       return (data: Uint8Array) => {
         try {

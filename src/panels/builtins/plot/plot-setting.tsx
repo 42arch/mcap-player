@@ -2,6 +2,8 @@ import type { PanelSettingsProps, PlotPanelConfig } from '@/panels/core/types'
 import { Plus, Trash2 } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { ColorPicker } from '@/components/ui/color-picker'
 import {
   Select,
   SelectContent,
@@ -12,7 +14,6 @@ import {
 import { getNumericFields } from '@/core/parsers/value-extractor'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { usePlayerStore } from '@/stores/use-player-store'
-import { HelpTooltip } from '../help-tooltip'
 import { SettingGroup } from '../setting-group'
 
 export default function PlotSetting({ config, updateConfig }: PanelSettingsProps<PlotPanelConfig>) {
@@ -46,7 +47,6 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
   }
 
   const channels = fileSummary?.channels || []
-  const windowOptions = [5, 10, 15, 30, 60]
 
   // Detect and scan first frame for series topics dynamically if not already scanned
   useEffect(() => {
@@ -70,46 +70,20 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background text-foreground">
       <div className="flex-1 overflow-y-auto">
-        {/* View Window Group */}
-        <SettingGroup title="View Window" defaultOpen>
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center">
-              Time Window Range
-              <HelpTooltip content="Set the scrolling time window duration (in seconds) for plotting values." />
-            </label>
-            <Select
-              value={String(config.windowSizeSeconds)}
-              onValueChange={val => updateConfig({ windowSizeSeconds: Number(val) })}
-            >
-              <SelectTrigger className="w-full bg-background border-border text-[11px] h-8 px-2 font-mono">
-                <SelectValue placeholder="Select time window..." />
-              </SelectTrigger>
-              <SelectContent position="popper" className="bg-popover text-popover-foreground">
-                {windowOptions.map(sec => (
-                  <SelectItem key={sec} value={String(sec)} className="font-mono text-[11px] py-1 h-8">
-                    {sec}
-                    {' '}
-                    Seconds
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </SettingGroup>
-
         {/* Plot Series Group */}
         <SettingGroup
           title={`Plot Series (${plotSeries.length})`}
           defaultOpen
-          action={
-            <button
+          action={(
+            <Button
+              variant="ghost"
+              size="icon-xs"
               onClick={addPlotSeries}
-              className="flex items-center gap-1 px-2 py-0.5 bg-primary text-primary-foreground hover:bg-primary/95 text-[10px] font-semibold rounded-md active:scale-95 transition-all cursor-pointer"
+              title="Add Series"
             >
-              <Plus className="w-3 h-3" />
-              Add Series
-            </button>
-          }
+              <Plus className="size-3.5" />
+            </Button>
+          )}
         >
           {/* Series Cards list */}
           <div className="space-y-3">
@@ -233,14 +207,10 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
                     {/* Color */}
                     <div className="space-y-1">
                       <span className="text-[8px] text-muted-foreground font-bold uppercase block">Color</span>
-                      <div className="flex items-center gap-1.5 h-6">
-                        <input
-                          type="color"
-                          value={s.color}
-                          onChange={e => updatePlotSeries(s.id, { color: e.target.value })}
-                          className="w-full h-full p-0 border-0 bg-transparent cursor-pointer outline-hidden rounded-md"
-                        />
-                      </div>
+                      <ColorPicker
+                        value={s.color}
+                        onChange={color => updatePlotSeries(s.id, { color })}
+                      />
                     </div>
                   </div>
                 </div>

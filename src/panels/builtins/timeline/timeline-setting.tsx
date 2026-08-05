@@ -1,14 +1,10 @@
 import type { PanelSettingsProps, TimelinePanelConfig } from '@/panels/core/types'
+import { Eye, EyeClosed } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Field,
-  FieldGroup,
-  FieldLabel,
-} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
 import { usePlayerStore } from '@/stores/use-player-store'
 import { SettingGroup } from '../setting-group'
 
@@ -72,21 +68,17 @@ export default function TimelineSetting({
       <div className="flex-1 overflow-y-auto">
         <SettingGroup
           title={`Timeline Topics (${selectedTopicSet.size}/${allTopics.length})`}
-          description="Choose which topic rows are visible. All topics are shown by default."
           defaultOpen
         >
           <div className="space-y-2.5">
-            <Field>
-              <FieldLabel htmlFor={`${fieldId}-search`} className="sr-only">
-                Filter topics
-              </FieldLabel>
+            <div>
               <Input
                 id={`${fieldId}-search`}
                 value={searchQuery}
                 onChange={event => setSearchQuery(event.target.value)}
                 placeholder="Filter topics…"
               />
-            </Field>
+            </div>
 
             <div className="flex items-center gap-2">
               <Button
@@ -95,7 +87,7 @@ export default function TimelineSetting({
                 size="xs"
                 onClick={() => updateConfig({ visibleTopics: null })}
               >
-                Select all
+                Show all
               </Button>
               <Button
                 type="button"
@@ -103,37 +95,53 @@ export default function TimelineSetting({
                 size="xs"
                 onClick={() => updateConfig({ visibleTopics: [] })}
               >
-                Clear
+                Hide all
               </Button>
             </div>
 
-            <ScrollArea className="max-h-80 rounded-md border border-border">
-              <FieldGroup data-slot="checkbox-group" className="gap-0 p-1">
+            <ScrollArea className="h-72 rounded-md border border-border">
+              <div className="flex flex-col gap-0.5 p-1">
                 {filteredOptions.map((option: TopicOption) => {
-                  const checkboxId = `${fieldId}-${encodeURIComponent(option.topic)}`
+                  const isVisible = selectedTopicSet.has(option.topic)
                   return (
-                    <Field
+                    <div
                       key={option.topic}
-                      orientation="horizontal"
-                      className="rounded-md px-2 py-1 hover:bg-accent"
+                      onClick={() => toggleTopic(option.topic, !isVisible)}
+                      className={cn(
+                        'flex items-center gap-2 rounded-md px-2 py-1 cursor-pointer transition-colors select-none',
+                        isVisible ? 'hover:bg-accent/80' : 'opacity-50 hover:bg-accent/40 bg-muted/20',
+                      )}
                     >
-                      <Checkbox
-                        id={checkboxId}
-                        checked={selectedTopicSet.has(option.topic)}
-                        onCheckedChange={checked => toggleTopic(option.topic, checked === true)}
-                      />
-                      <FieldLabel htmlFor={checkboxId} className="min-w-0 cursor-pointer">
-                        <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={option.topic}>
-                          {option.topic}
-                        </span>
-                        <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
-                          {option.messageCount.toLocaleString()}
-                        </span>
-                      </FieldLabel>
-                    </Field>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleTopic(option.topic, !isVisible)
+                        }}
+                        className="p-0.5 shrink-0 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                        title={isVisible ? 'Hide topic' : 'Show topic'}
+                      >
+                        {isVisible
+                          ? (
+                              <Eye className="w-3.5 h-3.5 text-primary" />
+                            )
+                          : (
+                              <EyeClosed className="w-3.5 h-3.5 text-muted-foreground/50" />
+                            )}
+                      </button>
+                      <span
+                        className={cn('min-w-0 flex-1 truncate font-mono text-[10px]', !isVisible && 'text-muted-foreground')}
+                        title={option.topic}
+                      >
+                        {option.topic}
+                      </span>
+                      <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
+                        {option.messageCount.toLocaleString()}
+                      </span>
+                    </div>
                   )
                 })}
-              </FieldGroup>
+              </div>
             </ScrollArea>
           </div>
         </SettingGroup>
