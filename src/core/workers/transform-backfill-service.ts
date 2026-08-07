@@ -105,7 +105,26 @@ export async function getTransformBackfillSnapshots({
   const topicsWithoutCheckpoint = uniqueTopics.filter(topic => !topicStates.get(topic)?.checkpoint)
   const scanGroups: Array<{ startTime?: bigint, topics: string[] }> = []
   if (topicsWithoutCheckpoint.length > 0) {
-    scanGroups.push({ topics: topicsWithoutCheckpoint })
+    let fallbackStartTime: bigint | undefined
+    if (reader.chunkIndexes && reader.chunkIndexes.length > 0) {
+      const chIds = new Set<number>()
+      for (const [chId, channel] of reader.channelsById) {
+        if (topicsWithoutCheckpoint.includes(channel.topic)) {
+          chIds.add(chId)
+        }
+      }
+      for (let i = reader.chunkIndexes.length - 1; i >= 0; i--) {
+        const chunk = reader.chunkIndexes[i]
+        if (chunk.messageStartTime <= seekTimeNs) {
+          const hasCh = Array.from(chIds).some(id => chunk.messageIndexOffsets.has(id))
+          if (hasCh) {
+            fallbackStartTime = chunk.messageStartTime
+            break
+          }
+        }
+      }
+    }
+    scanGroups.push({ startTime: fallbackStartTime, topics: topicsWithoutCheckpoint })
   }
   const appendCheckpointScanGroup = (groupTopics: string[]) => {
     if (groupTopics.length === 0) {

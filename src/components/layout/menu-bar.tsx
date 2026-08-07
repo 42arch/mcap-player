@@ -1,9 +1,10 @@
 import type { SupportedLocale } from '@/stores/use-locale-store'
 import { FileCode, Moon, Sun } from 'lucide-react'
 import { useTheme } from 'next-themes'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { FormattedMessage } from 'react-intl'
 import { toast } from 'sonner'
+import { OpenRemoteModal } from '@/components/modals/open-remote-modal'
 import { Button } from '@/components/ui/button'
 import {
   Menubar,
@@ -38,6 +39,7 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
   const { theme, setTheme } = useTheme()
   const locale = useLocaleStore(state => state.locale)
   const setLocale = useLocaleStore(state => state.setLocale)
+  const [remoteModalOpen, setRemoteModalOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const layoutInputRef = useRef<HTMLInputElement>(null)
   const fileSummary = usePlayerStore(state => state.fileSummary)
@@ -148,6 +150,12 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
               className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
             >
               <FormattedMessage id="menu.openFile" defaultMessage="Open File" />
+            </MenubarItem>
+            <MenubarItem
+              onClick={() => setRemoteModalOpen(true)}
+              className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
+            >
+              <FormattedMessage id="menu.openUrl" defaultMessage="Open Remote URL..." />
             </MenubarItem>
             <MenubarItem
               disabled={!fileSummary}
@@ -268,6 +276,11 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
         </TooltipTrigger>
         <TooltipContent side="bottom">Toggle theme</TooltipContent>
       </Tooltip>
+
+      <OpenRemoteModal
+        open={remoteModalOpen}
+        onOpenChange={setRemoteModalOpen}
+      />
     </div>
   )
 }

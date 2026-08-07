@@ -144,6 +144,51 @@ export class PlaybackController {
     store.setFileSummary(summary)
   }
 
+  async loadUrl(url: string) {
+    this.pause()
+    this.pendingSeekBackfill = null
+    this.seekGeneration++
+    this.invalidatePlaybackQuery()
+    resetDatasetResources()
+    setPlaybackElapsedNs(0n)
+    this.pendingQueryEndTimeNs = null
+    this.timelineDataPromise = null
+    const worker = this.getWorker()
+    const seekWorker = this.getSeekWorker()
+    const [, summary] = await Promise.all([
+      worker.initialize(url, { buildSpatialIndex: false }),
+      seekWorker.initialize(url, { buildSpatialIndex: true }),
+    ])
+
+    let fileName = url.split('/').pop() || url
+    try {
+      const parsedUrl = new URL(url)
+      const pathname = parsedUrl.pathname
+      const extracted = pathname.split('/').pop()
+      if (extracted) {
+        fileName = extracted
+      }
+    }
+    catch {
+      // Fallback to original url
+    }
+
+    const remoteSummary = {
+      ...summary,
+      name: fileName,
+      url,
+      isRemote: true,
+    }
+
+    this.fileSummary = remoteSummary
+    this.clock = new PlaybackClock(summary.startNs, summary.endNs)
+    this.lastTickTimeNs = summary.startNs
+
+    // update Zustand store
+    const store = usePlayerStore.getState()
+    store.setFileSummary(remoteSummary)
+  }
+
   closeFile() {
     this.pause()
     this.pendingSeekBackfill = null

@@ -2,11 +2,13 @@ import type { DispatchModeByTopic } from './message-cursor'
 import type { PlotSeriesData, PlotSeriesRequest } from './plot-data'
 import type { BackfillClass } from './topic-classifier'
 import type { MessageProcessorByTopic } from '@/core/message-processing'
+import type { IReadable } from '@mcap/core'
 import { Buffer } from 'buffer/'
 import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
 import { loadDecompressHandlers } from '@mcap/support'
 import { expose, transfer } from 'comlink'
+import { UrlReadable } from '@/core/loaders/url-readable'
 import { isH264Format } from '@/core/parsers/h264'
 import { createNumericValueAccessor } from '@/core/parsers/value-extractor'
 import {
@@ -49,13 +51,15 @@ class McapWorker {
   private canceledPlotRequestIds = new Set<number>()
   private timelineGeneration = 0
 
-  async initialize(file: File, options: InitializeOptions = {}) {
+  async initialize(source: File | string, options: InitializeOptions = {}) {
     this.activePlotRequestIds.forEach(requestId => this.canceledPlotRequestIds.add(requestId))
     this.timelineGeneration++
     if (!this.decompressHandlers) {
       this.decompressHandlers = await loadDecompressHandlers()
     }
-    const readable = new BlobReadable(file)
+    const readable: IReadable = typeof source === 'string'
+      ? new UrlReadable(source)
+      : new BlobReadable(source)
     this.reader = await McapIndexedReader.Initialize({
       readable,
       decompressHandlers: this.decompressHandlers,
@@ -111,7 +115,7 @@ class McapWorker {
       })
     }
 
-    // Calculate start and end times from chunk indexes
+    // Calculate start and end times from chunk indexes or statistics
     let startNs = -1n
     let endNs = -1n
     if (this.reader.chunkIndexes.length > 0) {
@@ -123,6 +127,10 @@ class McapWorker {
           endNs = idx.messageEndTime
         }
       }
+    }
+    else if (this.reader.statistics) {
+      startNs = this.reader.statistics.messageStartTime
+      endNs = this.reader.statistics.messageEndTime
     }
 
     if (startNs === -1n || endNs === -1n) {
@@ -140,13 +148,35 @@ class McapWorker {
 
     channelsList.sort((a, b) => a.topic.localeCompare(b.topic))
     const durationNs = endNs - startNs
-    const frameIds = options.buildSpatialIndex === false
+    const isRemote = typeof source === 'string'
+    const frameIds = (options.buildSpatialIndex === false || isRemote)
       ? []
       : await this.cursor.buildSpatialSeekIndex(endNs > -1n ? endNs : 0n)
 
+    const size = typeof source === 'string'
+      ? Number(await readable.size())
+      : source.size
+
+    let name = typeof source === 'string'
+      ? (source.split('/').pop() || source)
+      : source.name
+
+    if (typeof source === 'string') {
+      try {
+        const parsed = new URL(source)
+        const extracted = parsed.pathname.split('/').pop()
+        if (extracted) {
+          name = extracted
+        }
+      }
+      catch {
+        // Fallback to name
+      }
+    }
+
     return {
-      name: file.name,
-      size: file.size,
+      name,
+      size,
       messageCount: stats ? Number(stats.messageCount) : 0,
       channels: channelsList,
       schemas: schemasList,

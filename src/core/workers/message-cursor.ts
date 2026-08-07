@@ -74,8 +74,8 @@ interface BufferedMessage {
   dataLength: number
 }
 
-const MAX_READ_AHEAD_MESSAGES = 64
-const MAX_READ_AHEAD_BYTES = 8 * 1024 * 1024
+const MAX_READ_AHEAD_MESSAGES = 1024
+const MAX_READ_AHEAD_BYTES = 32 * 1024 * 1024
 const MAX_BATCH_MESSAGES = 256
 const MAX_BATCH_BYTES = 8 * 1024 * 1024
 const MAX_BATCH_WALL_MS = 6
@@ -513,8 +513,46 @@ export class MessageCursor {
       return messages.sort(compareDecodedMessages)
     }
 
+    // Calculate a tight startTime using chunkIndexes to prevent scanning all chunks backward over HTTP
+    let minBackfillStartTimeNs: bigint | undefined
+    if (this.reader.chunkIndexes && this.reader.chunkIndexes.length > 0) {
+      const targetChannelIdsByTopic = new Map<string, number[]>()
+      for (const [chId, channel] of this.reader.channelsById) {
+        if (topicsRemaining.has(channel.topic)) {
+          if (!targetChannelIdsByTopic.has(channel.topic)) {
+            targetChannelIdsByTopic.set(channel.topic, [])
+          }
+          targetChannelIdsByTopic.get(channel.topic)!.push(chId)
+        }
+      }
+
+      let earliestChunkStartTime: bigint | undefined
+      for (const [topic, channelIds] of targetChannelIdsByTopic.entries()) {
+        let topicChunkStartTime: bigint | undefined
+        for (let i = this.reader.chunkIndexes.length - 1; i >= 0; i--) {
+          const chunk = this.reader.chunkIndexes[i]
+          if (chunk.messageStartTime <= seekTimeNs) {
+            const hasChannel = channelIds.some(chId => chunk.messageIndexOffsets.has(chId))
+            if (hasChannel) {
+              topicChunkStartTime = chunk.messageStartTime
+              break
+            }
+          }
+        }
+        if (topicChunkStartTime !== undefined) {
+          if (earliestChunkStartTime === undefined || topicChunkStartTime < earliestChunkStartTime) {
+            earliestChunkStartTime = topicChunkStartTime
+          }
+        }
+      }
+      if (earliestChunkStartTime !== undefined) {
+        minBackfillStartTimeNs = earliestChunkStartTime
+      }
+    }
+
     // Query backward to get latest historical messages
     const backfillIterator = this.reader.readMessages({
+      ...(minBackfillStartTimeNs !== undefined ? { startTime: minBackfillStartTimeNs } : {}),
       endTime: seekTimeNs + 1n,
       topics: Array.from(topicsRemaining),
       reverse: true,

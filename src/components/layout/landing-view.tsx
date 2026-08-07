@@ -1,6 +1,7 @@
-import { FolderOpen } from 'lucide-react'
-import { useRef } from 'react'
+import { FolderOpen, Globe } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { FormattedMessage } from 'react-intl'
+import { OpenRemoteModal } from '@/components/modals/open-remote-modal'
 
 interface LandingViewProps {
   darkMode: boolean
@@ -9,6 +10,7 @@ interface LandingViewProps {
 
 export default function LandingView({ darkMode, onFileChange }: LandingViewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [remoteModalOpen, setRemoteModalOpen] = useState(false)
 
   return (
     <div
@@ -41,20 +43,32 @@ export default function LandingView({ darkMode, onFileChange }: LandingViewProps
           </p>
         </div>
 
-        <div>
+        <div className="flex flex-wrap items-center justify-center gap-3">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="px-6 py-2.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:opacity-90 active:scale-95 transition-all shadow-md cursor-pointer flex items-center gap-2 mx-auto"
+            className="px-5 py-2.5 bg-primary text-primary-foreground text-xs font-semibold rounded-lg hover:opacity-90 active:scale-95 transition-all shadow-md cursor-pointer flex items-center gap-2"
           >
             <FolderOpen className="size-4" />
             <FormattedMessage id="landing.chooseFile" defaultMessage="Choose File" />
           </button>
+          <button
+            onClick={() => setRemoteModalOpen(true)}
+            className="px-5 py-2.5 bg-secondary text-secondary-foreground text-xs font-semibold rounded-lg hover:bg-secondary/80 active:scale-95 transition-all shadow-sm cursor-pointer flex items-center gap-2 border border-border"
+          >
+            <Globe className="size-4 text-primary" />
+            <FormattedMessage id="landing.openUrl" defaultMessage="Open Remote URL" />
+          </button>
         </div>
 
         <div className="pt-2 text-[10px] text-muted-foreground/60 border-t border-border/50">
-          Supports Standard MCAP files (uncompressed, Zstd, or LZ4)
+          Supports Standard MCAP files (uncompressed, Zstd, or LZ4) over HTTP/HTTPS Range Requests
         </div>
       </div>
+
+      <OpenRemoteModal
+        open={remoteModalOpen}
+        onOpenChange={setRemoteModalOpen}
+      />
     </div>
   )
 }
