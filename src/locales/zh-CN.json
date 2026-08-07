@@ -50,6 +50,8 @@
   "panel.timeline.description": "按 Topic 查看消息时间点分布",
   "panel.3d.title": "3D 空间视图",
   "panel.3d.description": "探索三维空间 Topic 数据",
+  "panel.map.title": "2D 地图",
+  "panel.map.description": "在地图上查看 GPS 和 GeoJSON 数据",
   "overview.fileSize": "文件大小",
   "overview.messages": "总消息数",
   "overview.duration": "总时长",

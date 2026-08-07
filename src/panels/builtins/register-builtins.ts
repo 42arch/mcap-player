@@ -1,5 +1,6 @@
 import type {
   ImagePanelConfig,
+  MapPanelConfig,
   PlotPanelConfig,
   RawMessagePanelConfig,
   ThreeDPanelConfig,
@@ -8,6 +9,7 @@ import type {
 import { registerBuiltInSceneAdapters } from '@/panels/builtins/three-d/register-built-in-scene-adapters'
 import { registerBuiltInSceneRenderers } from '@/panels/builtins/three-d/register-built-in-scene-renderers'
 import { registerPanel } from '@/panels/core/panel-registry'
+import { DEFAULT_OSM_STYLE_URL } from './map/map-style'
 
 let registered = false
 
@@ -130,6 +132,31 @@ export function registerBuiltInPanels() {
     }),
     loadPanel: () => import('@/panels/builtins/timeline/timeline-panel'),
     loadSettings: () => import('@/panels/builtins/timeline/timeline-setting'),
+  })
+
+  registerPanel<MapPanelConfig>({
+    type: 'map',
+    title: '2D Map View',
+    configVersion: 1,
+    createDefaultConfig: () => ({
+      styleUrl: DEFAULT_OSM_STYLE_URL,
+      positionTopic: null,
+      visibleGeoJsonTopics: {},
+      historyMode: 'all-previous',
+      historySeconds: 30,
+      pointStyle: 'arrow',
+      showHeading: true,
+      showVelocity: true,
+      pointSize: 7,
+      colorMode: 'automatic',
+      customColor: '#2563eb',
+      trackColor: '#2563eb',
+      trackWidth: 3,
+      followMode: 'follow',
+      maxTrackPoints: 50000,
+    }),
+    loadPanel: () => import('./map/map-panel'),
+    loadSettings: () => import('./map/map-setting'),
   })
 
   registerPanel<ThreeDPanelConfig>({

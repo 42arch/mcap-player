@@ -28,6 +28,27 @@ export interface TimelinePanelConfig extends PanelConfig {
   visibleTopics: string[] | null
 }
 
+export type MapHistoryMode = 'latest' | 'all-previous' | 'last-n-seconds' | 'all'
+export type MapPointStyle = 'dot' | 'arrow' | 'diamond' | 'square' | 'plus' | 'cross' | 'pin'
+
+export interface MapPanelConfig extends PanelConfig {
+  styleUrl: string
+  positionTopic: string | null
+  visibleGeoJsonTopics: Record<string, boolean>
+  historyMode: MapHistoryMode
+  historySeconds: number
+  pointStyle: MapPointStyle
+  showHeading: boolean
+  showVelocity: boolean
+  pointSize: number
+  colorMode: 'automatic' | 'custom'
+  customColor: string
+  trackColor: string
+  trackWidth: number
+  followMode: 'follow' | 'free'
+  maxTrackPoints: number
+}
+
 export interface ThreeDPanelConfig extends PanelConfig, ThreeDSettings {}
 
 export interface PanelComponentProps<C extends PanelConfig = PanelConfig> {
