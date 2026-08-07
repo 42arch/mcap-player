@@ -1,5 +1,5 @@
 import { FastForward, Pause, Play, Rewind } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,46 @@ import {
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { usePlaybackControls } from '@/hooks/use-playback'
-import { formatDuration, formatNanoseconds } from '@/lib/time'
+import { formatBytes, formatDuration, formatNanoseconds } from '@/lib/time'
+import { usePlayerStore } from '@/stores/use-player-store'
+
+interface RemoteLoadTrackOverlayProps {
+  ranges: ReadonlyArray<{ startNs: bigint, endNs: bigint }>
+  startNs: bigint
+  endNs: bigint
+}
+
+function getTrackPercent(valueNs: bigint, startNs: bigint, durationNs: bigint): number {
+  if (durationNs <= 0n) {
+    return 0
+  }
+  const scaled = ((valueNs - startNs) * 100_000n) / durationNs
+  return Math.max(0, Math.min(100, Number(scaled) / 1000))
+}
+
+function RemoteLoadTrackOverlay({ ranges, startNs, endNs }: RemoteLoadTrackOverlayProps) {
+  const durationNs = endNs - startNs
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      {ranges.map((range) => {
+        const rangeStart = range.startNs > startNs ? range.startNs : startNs
+        const rangeEnd = range.endNs < endNs ? range.endNs : endNs
+        const left = getTrackPercent(rangeStart, startNs, durationNs)
+        const right = getTrackPercent(rangeEnd, startNs, durationNs)
+        if (right <= left) {
+          return null
+        }
+        return (
+          <div
+            key={`${range.startNs}:${range.endNs}`}
+            className="absolute inset-y-0 rounded-sm bg-primary/35"
+            style={{ left: `${left}%`, width: `${right - left}%` }}
+          />
+        )
+      })}
+    </div>
+  )
+}
 
 export default function Playback() {
   const intl = useIntl()
@@ -33,6 +72,7 @@ export default function Playback() {
     startNs,
     fileSummary,
   } = usePlaybackControls()
+  const remoteLoadProgress = usePlayerStore(state => state.remoteLoadProgress)
 
   const displayedSeconds = scrubSeconds ?? elapsedSeconds
   const elapsedNs = BigInt(Math.round(displayedSeconds * 1_000_000_000))
@@ -42,6 +82,18 @@ export default function Playback() {
 
   const hoverElapsedNs = hoverInfo ? BigInt(Math.round(hoverInfo.seconds * 1_000_000_000)) : 0n
   const hoverRealNs = fileSummary && hoverInfo ? startNs + hoverElapsedNs : 0n
+  const remoteTrackOverlay = useMemo(() => {
+    if (!remoteLoadProgress || !fileSummary || fileSummary.endNs <= fileSummary.startNs) {
+      return undefined
+    }
+    return (
+      <RemoteLoadTrackOverlay
+        ranges={remoteLoadProgress.playableTimeRanges}
+        startNs={fileSummary.startNs}
+        endNs={fileSummary.endNs}
+      />
+    )
+  }, [fileSummary, remoteLoadProgress])
 
   const tooltipRef = useRef<HTMLDivElement>(null)
   const hoverRealTextRef = useRef<HTMLDivElement>(null)
@@ -124,6 +176,7 @@ export default function Playback() {
           }}
           disabled={durationSeconds === 0}
           className="w-full cursor-pointer"
+          trackOverlay={remoteTrackOverlay}
         />
 
         {/* Zero-latency Hover Time Tooltip via Direct DOM & Portal */}
@@ -230,6 +283,29 @@ export default function Playback() {
             {' / '}
             {formatDuration(durationNs, 3)}
           </div>
+          {remoteLoadProgress && (
+            <div
+              className="text-primary/80"
+              title={intl.formatMessage(
+                { id: 'playback.remoteLoadProgress', defaultMessage: 'Cached {loaded} / {total} ({percent}%)' },
+                {
+                  loaded: formatBytes(remoteLoadProgress.downloadedBytes),
+                  total: formatBytes(remoteLoadProgress.totalBytes),
+                  percent: Math.round(remoteLoadProgress.percent),
+                },
+              )}
+            >
+              <FormattedMessage
+                id="playback.remoteLoadProgress"
+                defaultMessage="Cached {loaded} / {total} ({percent}%)"
+                values={{
+                  loaded: formatBytes(remoteLoadProgress.downloadedBytes),
+                  total: formatBytes(remoteLoadProgress.totalBytes),
+                  percent: Math.round(remoteLoadProgress.percent),
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

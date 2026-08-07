@@ -1,3 +1,4 @@
+import type { McapSource } from '@/core/sources/mcap-source'
 import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { TimelineTopicData } from '@/core/workers/timeline-data'
 import type { BackfillClass } from '@/core/workers/topic-classifier'
@@ -5,6 +6,7 @@ import { wrap } from 'comlink'
 import { resetDatasetResources } from '@/core/dataset-resource-registry'
 import { PlaybackBatchAccumulator } from '@/core/playback-batch-accumulator'
 import { setPlaybackElapsedNs } from '@/core/playback-time-store'
+import { createRemoteMcapSource } from '@/core/sources/mcap-source'
 import { getBackfillClass } from '@/core/workers/topic-classifier'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -22,6 +24,9 @@ interface PlaybackMessageBatch {
 }
 
 const SEEK_BACKFILL_PHASES: readonly BackfillClass[] = ['fast', 'spatial', 'media']
+const MIB = 1024 * 1024
+const PLAYBACK_REMOTE_CACHE_BYTES = 96 * MIB
+const SEEK_REMOTE_CACHE_BYTES = 64 * MIB
 
 export class PlaybackController {
   private worker: any = null
@@ -43,6 +48,10 @@ export class PlaybackController {
   private playbackBatchAccumulator = new PlaybackBatchAccumulator<any>()
   private timelineDataPromise: Promise<TimelineTopicData[]> | null = null
   private nextPlotRequestId = 0
+  private loadGeneration = 0
+  private remoteProgressTimer: ReturnType<typeof setInterval> | null = null
+  private remoteProgressSession = 0
+  private isRemoteProgressPolling = false
 
   constructor() {
     globalMessagePipeline.onSubscriptionsChanged((panelId) => {
@@ -121,6 +130,16 @@ export class PlaybackController {
   }
 
   async loadFile(file: File) {
+    await this.loadSource({ kind: 'local', file })
+  }
+
+  async loadRemoteUrl(url: string) {
+    await this.loadSource(createRemoteMcapSource(url))
+  }
+
+  async loadSource(source: McapSource) {
+    const loadGeneration = ++this.loadGeneration
+    this.stopRemoteProgressPolling()
     this.pause()
     this.pendingSeekBackfill = null
     this.seekGeneration++
@@ -131,10 +150,30 @@ export class PlaybackController {
     this.timelineDataPromise = null
     const worker = this.getWorker()
     const seekWorker = this.getSeekWorker()
-    const [, summary] = await Promise.all([
-      worker.initialize(file, { buildSpatialIndex: false }),
-      seekWorker.initialize(file, { buildSpatialIndex: true }),
-    ])
+    let playbackSummary: any
+    let seekSummary: any
+    try {
+      [playbackSummary, seekSummary] = await Promise.all([
+        worker.initialize(source, {
+          buildSpatialIndex: false,
+          remoteCacheBytes: PLAYBACK_REMOTE_CACHE_BYTES,
+        }),
+        seekWorker.initialize(source, {
+          buildSpatialIndex: source.kind === 'local',
+          remoteCacheBytes: SEEK_REMOTE_CACHE_BYTES,
+        }),
+      ])
+    }
+    catch (error) {
+      if (loadGeneration !== this.loadGeneration) {
+        return
+      }
+      throw error
+    }
+    if (loadGeneration !== this.loadGeneration) {
+      return
+    }
+    const summary = source.kind === 'local' ? seekSummary : playbackSummary
     this.fileSummary = summary
     this.clock = new PlaybackClock(summary.startNs, summary.endNs)
     this.lastTickTimeNs = summary.startNs
@@ -142,9 +181,14 @@ export class PlaybackController {
     // update Zustand store
     const store = usePlayerStore.getState()
     store.setFileSummary(summary)
+    if (source.kind === 'remote') {
+      this.startRemoteProgressPolling(loadGeneration)
+    }
   }
 
   closeFile() {
+    this.loadGeneration++
+    this.stopRemoteProgressPolling()
     this.pause()
     this.pendingSeekBackfill = null
     this.seekGeneration++
@@ -157,6 +201,12 @@ export class PlaybackController {
     resetDatasetResources()
     setPlaybackElapsedNs(0n)
     usePlayerStore.getState().setFileSummary(null)
+    this.worker?.closeSource().catch((error: unknown) => {
+      console.warn('Failed to close playback worker source:', error)
+    })
+    this.seekWorker?.closeSource().catch((error: unknown) => {
+      console.warn('Failed to close seek worker source:', error)
+    })
   }
 
   play() {
@@ -430,6 +480,52 @@ export class PlaybackController {
       cancelAnimationFrame(this.animationFrameId)
       this.animationFrameId = null
     }
+  }
+
+  private startRemoteProgressPolling(loadGeneration: number) {
+    this.stopRemoteProgressPolling()
+    const session = this.remoteProgressSession
+    const poll = async () => {
+      if (
+        session !== this.remoteProgressSession
+        || loadGeneration !== this.loadGeneration
+        || this.isRemoteProgressPolling
+      ) {
+        return
+      }
+      this.isRemoteProgressPolling = true
+      try {
+        const progress = await this.getWorker().getLoadProgress()
+        if (session === this.remoteProgressSession && loadGeneration === this.loadGeneration) {
+          usePlayerStore.getState().setRemoteLoadProgress(progress)
+        }
+      }
+      catch (error) {
+        if (session === this.remoteProgressSession && loadGeneration === this.loadGeneration) {
+          console.warn('Failed to read remote MCAP progress:', error)
+        }
+      }
+      finally {
+        if (session === this.remoteProgressSession) {
+          this.isRemoteProgressPolling = false
+        }
+      }
+    }
+
+    void poll()
+    this.remoteProgressTimer = setInterval(() => {
+      void poll()
+    }, 500)
+  }
+
+  private stopRemoteProgressPolling() {
+    this.remoteProgressSession++
+    this.isRemoteProgressPolling = false
+    if (this.remoteProgressTimer !== null) {
+      clearInterval(this.remoteProgressTimer)
+      this.remoteProgressTimer = null
+    }
+    usePlayerStore.getState().setRemoteLoadProgress(null)
   }
 
   async getFirstMessagePayload(topic: string) {

@@ -2,6 +2,8 @@ import type { DispatchModeByTopic } from './message-cursor'
 import type { PlotSeriesData, PlotSeriesRequest } from './plot-data'
 import type { BackfillClass } from './topic-classifier'
 import type { MessageProcessorByTopic } from '@/core/message-processing'
+import type { McapSource } from '@/core/sources/mcap-source'
+import type { IndexedChunkCoverage, RemoteLoadProgress } from '@/core/sources/remote-load-progress'
 import { Buffer } from 'buffer/'
 import { BlobReadable } from '@mcap/browser'
 import { McapIndexedReader } from '@mcap/core'
@@ -9,6 +11,8 @@ import { loadDecompressHandlers } from '@mcap/support'
 import { expose, transfer } from 'comlink'
 import { isH264Format } from '@/core/parsers/h264'
 import { createNumericValueAccessor } from '@/core/parsers/value-extractor'
+import { CachedHttpReadable } from '@/core/sources/cached-http-readable'
+import { getPlayableTimeRanges } from '@/core/sources/remote-load-progress'
 import {
   getTransferableBuffers,
   MessageCursor,
@@ -21,10 +25,37 @@ type BackfillPhase = 'all' | BackfillClass
 
 interface InitializeOptions {
   buildSpatialIndex?: boolean
+  remoteCacheBytes?: number
 }
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0))
+}
+
+function buildChunkCoverage(reader: McapIndexedReader): IndexedChunkCoverage[] {
+  const chunksByOffset = [...reader.chunkIndexes]
+    .sort((a, b) => (a.chunkStartOffset < b.chunkStartOffset ? -1 : a.chunkStartOffset > b.chunkStartOffset ? 1 : 0))
+  const coverage: IndexedChunkCoverage[] = []
+
+  for (const [index, chunk] of chunksByOffset.entries()) {
+    const chunkStart = Number(chunk.chunkStartOffset)
+    const chunkEnd = Number(chunk.chunkStartOffset + chunk.chunkLength)
+    const nextChunkStart = chunksByOffset[index + 1] === undefined
+      ? undefined
+      : Number(chunksByOffset[index + 1].chunkStartOffset)
+    const byteEnd = nextChunkStart !== undefined && nextChunkStart > chunkEnd
+      ? nextChunkStart
+      : chunkEnd
+    if (!Number.isSafeInteger(chunkStart) || !Number.isSafeInteger(byteEnd) || byteEnd <= chunkStart) {
+      continue
+    }
+    coverage.push({
+      byteRange: { start: chunkStart, end: byteEnd },
+      startNs: chunk.messageStartTime,
+      endNs: chunk.messageEndTime,
+    })
+  }
+  return coverage.sort((a, b) => (a.startNs < b.startNs ? -1 : a.startNs > b.startNs ? 1 : 0))
 }
 
 // @foxglove/wasm-lz4 expects Node's Buffer when copying decompressed bytes.
@@ -36,8 +67,11 @@ if (workerBuffer === undefined || workerBuffer === null) {
 
 class McapWorker {
   private reader: McapIndexedReader | null = null
+  private remoteReadable: CachedHttpReadable | null = null
+  private chunkCoverage: IndexedChunkCoverage[] = []
   private decompressHandlers: any = null
   private cursor = new MessageCursor()
+  private initializeGeneration = 0
 
   // Track cursor tracking state to detect jumps/changes
   private lastTopics: string[] = []
@@ -49,17 +83,44 @@ class McapWorker {
   private canceledPlotRequestIds = new Set<number>()
   private timelineGeneration = 0
 
-  async initialize(file: File, options: InitializeOptions = {}) {
+  async initialize(source: McapSource, options: InitializeOptions = {}) {
+    const initializeGeneration = ++this.initializeGeneration
+    this.remoteReadable?.close()
+    this.remoteReadable = null
+    this.chunkCoverage = []
+    this.reader = null
+    this.cursor.setReader(null)
     this.activePlotRequestIds.forEach(requestId => this.canceledPlotRequestIds.add(requestId))
     this.timelineGeneration++
     if (!this.decompressHandlers) {
       this.decompressHandlers = await loadDecompressHandlers()
     }
-    const readable = new BlobReadable(file)
-    this.reader = await McapIndexedReader.Initialize({
+    if (initializeGeneration !== this.initializeGeneration) {
+      throw new DOMException('MCAP initialization was canceled.', 'AbortError')
+    }
+
+    const readable = source.kind === 'local'
+      ? new BlobReadable(source.file)
+      : new CachedHttpReadable(source.url, {
+          knownSize: source.knownSize,
+          cacheSizeBytes: options.remoteCacheBytes,
+        })
+    if (source.kind === 'remote') {
+      this.remoteReadable = readable as CachedHttpReadable
+    }
+
+    const reader = await McapIndexedReader.Initialize({
       readable,
       decompressHandlers: this.decompressHandlers,
     })
+    if (initializeGeneration !== this.initializeGeneration) {
+      if (source.kind === 'remote') {
+        (readable as CachedHttpReadable).close()
+      }
+      throw new DOMException('MCAP initialization was canceled.', 'AbortError')
+    }
+    this.reader = reader
+    this.chunkCoverage = source.kind === 'remote' ? buildChunkCoverage(reader) : []
 
     this.cursor.setReader(this.reader)
 
@@ -145,8 +206,8 @@ class McapWorker {
       : await this.cursor.buildSpatialSeekIndex(endNs > -1n ? endNs : 0n)
 
     return {
-      name: file.name,
-      size: file.size,
+      name: source.kind === 'local' ? source.file.name : source.name,
+      size: source.kind === 'local' ? source.file.size : Number(await readable.size()),
       messageCount: stats ? Number(stats.messageCount) : 0,
       channels: channelsList,
       schemas: schemasList,
@@ -154,6 +215,34 @@ class McapWorker {
       startNs: startNs > -1n ? startNs : 0n,
       endNs: endNs > -1n ? endNs : 0n,
       frameIds,
+    }
+  }
+
+  closeSource() {
+    this.initializeGeneration++
+    this.timelineGeneration++
+    this.activePlotRequestIds.forEach(requestId => this.canceledPlotRequestIds.add(requestId))
+    this.remoteReadable?.close()
+    this.remoteReadable = null
+    this.chunkCoverage = []
+    this.reader = null
+    this.cursor.setReader(null)
+  }
+
+  async getLoadProgress(): Promise<RemoteLoadProgress | null> {
+    const readable = this.remoteReadable
+    if (!readable) {
+      return null
+    }
+    const downloadedByteRanges = readable.getDownloadedRanges()
+    const totalBytes = Number(await readable.size())
+    const downloadedBytes = readable.getDownloadedBytes()
+    return {
+      downloadedByteRanges,
+      downloadedBytes,
+      totalBytes,
+      percent: totalBytes > 0 ? Math.min(100, (downloadedBytes / totalBytes) * 100) : 0,
+      playableTimeRanges: getPlayableTimeRanges(this.chunkCoverage, downloadedByteRanges),
     }
   }
 
