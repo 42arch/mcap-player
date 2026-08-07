@@ -1,8 +1,9 @@
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
+import type { SupportedLocale } from '@/stores/use-locale-store'
 import { IntlProvider } from 'react-intl'
 import enUS from '@/locales/en-US.json'
 import zhCN from '@/locales/zh-CN.json'
-import { SupportedLocale, useLocaleStore } from '@/stores/use-locale-store'
+import { useLocaleStore } from '@/stores/use-locale-store'
 
 const messagesMap: Record<SupportedLocale, Record<string, string>> = {
   'en-US': enUS,

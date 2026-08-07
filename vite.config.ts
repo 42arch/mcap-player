@@ -51,6 +51,9 @@ export default defineConfig({
   // for WASM files. Keep Vite's dependency optimizer from wrapping those files
   // as JavaScript modules.
   optimizeDeps: {
+    // MapLibre loads its worker as a sibling ESM asset. Let Vite preserve that
+    // package boundary instead of generating a fragile optimized worker path.
+    exclude: ['maplibre-gl'],
     entries: [
       'index.html',
       'src/core/workers/mcap.worker.ts',

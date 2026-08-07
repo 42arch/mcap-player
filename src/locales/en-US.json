@@ -50,6 +50,8 @@
   "panel.timeline.description": "Inspect message timing by topic",
   "panel.3d.title": "3D",
   "panel.3d.description": "Explore spatial topic data",
+  "panel.map.title": "2D Map",
+  "panel.map.description": "View GPS and GeoJSON data on a map",
   "overview.fileSize": "File Size",
   "overview.messages": "Messages",
   "overview.duration": "Duration",
