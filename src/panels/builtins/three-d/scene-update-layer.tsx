@@ -847,7 +847,6 @@ export function SceneUpdateLayer({
     }
   }, [adapter, channel, panelId, topic])
 
-
   return (
     <group>
       {sceneByFrame.map(([frameId, frameScene]) => (

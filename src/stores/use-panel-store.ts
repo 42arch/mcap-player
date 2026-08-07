@@ -1,6 +1,8 @@
+import type { DockviewApi } from 'dockview-react'
 import type { PanelConfig, PanelId, PanelInstance, PanelType } from '@/panels/core/types'
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
+
 import { getPanelDefinition } from '@/panels/core/panel-registry'
 
 interface PanelState {
@@ -9,6 +11,7 @@ interface PanelState {
   activePanelId: PanelId | null
   selectedPanelId: PanelId | null
   sidebarTab: 'topics' | 'settings'
+  dockviewApi: DockviewApi | null
 
   addPanel: (type: PanelType, initialConfig?: Partial<PanelConfig>) => PanelId
   removePanel: (panelId: PanelId) => void
@@ -16,7 +19,9 @@ interface PanelState {
   setActivePanel: (panelId: PanelId | null) => void
   setSelectedPanel: (panelId: PanelId | null) => void
   setSidebarTab: (tab: 'topics' | 'settings') => void
+  setDockviewApi: (api: DockviewApi | null) => void
   resetPanels: () => void
+  loadPanelsState: (panelsById: Record<PanelId, PanelInstance>, panelOrder: PanelId[]) => void
 }
 
 export const usePanelStore = create<PanelState>((set, get) => ({
@@ -25,6 +30,7 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   activePanelId: null,
   selectedPanelId: null,
   sidebarTab: 'topics',
+  dockviewApi: null,
 
   addPanel: (type, initialConfig = {}) => {
     const definition = getPanelDefinition(type)
@@ -89,6 +95,7 @@ export const usePanelStore = create<PanelState>((set, get) => ({
   setActivePanel: panelId => set({ activePanelId: panelId }),
   setSelectedPanel: panelId => set({ selectedPanelId: panelId }),
   setSidebarTab: sidebarTab => set({ sidebarTab }),
+  setDockviewApi: dockviewApi => set({ dockviewApi }),
   resetPanels: () =>
     set({
       panelsById: {},
@@ -97,4 +104,13 @@ export const usePanelStore = create<PanelState>((set, get) => ({
       selectedPanelId: null,
       sidebarTab: 'topics',
     }),
+  loadPanelsState: (panelsById, panelOrder) => {
+    const firstId = panelOrder[0] ?? null
+    set({
+      panelsById,
+      panelOrder,
+      activePanelId: firstId,
+      selectedPanelId: firstId,
+    })
+  },
 }))

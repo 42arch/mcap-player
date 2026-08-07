@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider } from '@/components/common/theme-provider'
+import I18nProvider from '@/components/i18n-provider'
 import AppShell from '@/components/layout/app-shell'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import '@/app/globals.css'
@@ -16,9 +17,11 @@ if (rootElement) {
         enableSystem
         disableTransitionOnChange
       >
-        <TooltipProvider>
-          <AppShell />
-        </TooltipProvider>
+        <I18nProvider>
+          <TooltipProvider>
+            <AppShell />
+          </TooltipProvider>
+        </I18nProvider>
       </ThemeProvider>
     </StrictMode>,
   )

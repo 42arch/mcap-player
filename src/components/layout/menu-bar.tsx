@@ -1,12 +1,21 @@
+import type { SupportedLocale } from '@/stores/use-locale-store'
 import { FileCode, Moon, Sun } from 'lucide-react'
+import { useTheme } from 'next-themes'
 import { useRef } from 'react'
+import { FormattedMessage } from 'react-intl'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Menubar,
   MenubarContent,
   MenubarItem,
   MenubarMenu,
+  MenubarRadioGroup,
+  MenubarRadioItem,
   MenubarSeparator,
+  MenubarSub,
+  MenubarSubContent,
+  MenubarSubTrigger,
   MenubarTrigger,
 } from '@/components/ui/menubar'
 import {
@@ -15,6 +24,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { buildExportData, downloadJsonFile, parseAndValidateConfig } from '@/panels/core/config-io'
+import { useLocaleStore } from '@/stores/use-locale-store'
 import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
 
@@ -24,11 +35,16 @@ interface MenuBarProps {
 }
 
 export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
+  const { theme, setTheme } = useTheme()
+  const locale = useLocaleStore(state => state.locale)
+  const setLocale = useLocaleStore(state => state.setLocale)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const layoutInputRef = useRef<HTMLInputElement>(null)
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const setIsLoading = usePlayerStore(state => state.setIsLoading)
   const setError = usePlayerStore(state => state.setError)
   const resetPanels = usePanelStore(state => state.resetPanels)
+  const dockviewApi = usePanelStore(state => state.dockviewApi)
 
   const handleCloseFile = () => {
     resetPanels()
@@ -60,9 +76,49 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
     fileInputRef.current?.click()
   }
 
+  const handleExportLayout = () => {
+    const { panelsById, panelOrder } = usePanelStore.getState()
+    const exportData = buildExportData(panelsById, panelOrder, dockviewApi)
+    const dateStr = new Date().toISOString().slice(0, 10)
+    downloadJsonFile(exportData, `mcapview-layout-${dateStr}.json`)
+    toast.success('Layout configuration exported successfully')
+  }
+
+  const handleImportLayoutClick = () => {
+    layoutInputRef.current?.click()
+  }
+
+  const handleLayoutFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+
+    try {
+      const text = await file.text()
+      const configData = parseAndValidateConfig(text)
+
+      usePanelStore.getState().loadPanelsState(configData.panelsById, configData.panelOrder)
+
+      if (dockviewApi && configData.dockviewLayout) {
+        dockviewApi.fromJSON(configData.dockviewLayout as any)
+      }
+      toast.success('Layout configuration imported successfully')
+    }
+    catch (err: any) {
+      console.error('Failed to import layout:', err)
+      toast.error(err.message || 'Failed to import layout configuration')
+    }
+    finally {
+      if (layoutInputRef.current) {
+        layoutInputRef.current.value = ''
+      }
+    }
+  }
+
   return (
     <div className="relative flex h-9 shrink-0 items-center justify-between border-b border-border bg-card px-3">
-      {/* Hidden File Input */}
+      {/* Hidden File Inputs */}
       <input
         type="file"
         ref={fileInputRef}
@@ -70,60 +126,117 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
         accept=".mcap"
         className="hidden"
       />
+      <input
+        type="file"
+        ref={layoutInputRef}
+        onChange={handleLayoutFileChange}
+        accept=".json"
+        className="hidden"
+      />
 
       <Menubar className="border-none bg-transparent h-7 p-0 flex gap-1">
         <MenubarMenu>
           <MenubarTrigger className="px-2 py-1 hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground text-foreground font-medium rounded-xs cursor-pointer">
-            File
+            <FormattedMessage id="menu.file" defaultMessage="File" />
           </MenubarTrigger>
           <MenubarContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-36">
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">New Project</MenubarItem>
+            <MenubarItem disabled className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+              <FormattedMessage id="menu.newProject" defaultMessage="New Project" />
+            </MenubarItem>
             <MenubarItem
               onClick={handleOpenClick}
               className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
             >
-              Open File...
+              <FormattedMessage id="menu.openFile" defaultMessage="Open File" />
             </MenubarItem>
             <MenubarItem
               disabled={!fileSummary}
               onClick={handleCloseFile}
               className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
             >
-              Close File
+              <FormattedMessage id="menu.closeFile" defaultMessage="Close File" />
             </MenubarItem>
             <MenubarSeparator className="bg-border" />
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Save</MenubarItem>
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Export Project...</MenubarItem>
+            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+              <FormattedMessage id="menu.save" defaultMessage="Save" />
+            </MenubarItem>
+            <MenubarItem disabled className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+              <FormattedMessage id="menu.exportProject" defaultMessage="Export Project" />
+            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
 
         <MenubarMenu>
           <MenubarTrigger className="px-2 py-1 hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground text-foreground font-medium rounded-xs cursor-pointer">
-            Edit
+            <FormattedMessage id="menu.layout" defaultMessage="Layout" />
           </MenubarTrigger>
           <MenubarContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-36">
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Undo</MenubarItem>
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Redo</MenubarItem>
+            <MenubarItem
+              onClick={handleImportLayoutClick}
+              className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
+            >
+              <FormattedMessage id="menu.importLayout" defaultMessage="Import Layout" />
+            </MenubarItem>
+            <MenubarItem
+              onClick={handleExportLayout}
+              className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer"
+            >
+              <FormattedMessage id="menu.exportLayout" defaultMessage="Export Layout" />
+            </MenubarItem>
+          </MenubarContent>
+        </MenubarMenu>
+        <MenubarMenu>
+          <MenubarTrigger className="px-2 py-1 hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground text-foreground font-medium rounded-xs cursor-pointer">
+            <FormattedMessage id="menu.settings" defaultMessage="Settings" />
+          </MenubarTrigger>
+          <MenubarContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-36">
+            <MenubarSub>
+              <MenubarSubTrigger className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                <FormattedMessage id="menu.language" defaultMessage="Language" />
+              </MenubarSubTrigger>
+              <MenubarSubContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-32">
+                <MenubarRadioGroup value={locale} onValueChange={val => setLocale(val as SupportedLocale)}>
+                  <MenubarRadioItem value="zh-CN" className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                    中文
+                  </MenubarRadioItem>
+                  <MenubarRadioItem value="en-US" className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                    English
+                  </MenubarRadioItem>
+                </MenubarRadioGroup>
+              </MenubarSubContent>
+            </MenubarSub>
+            <MenubarSub>
+              <MenubarSubTrigger className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                <FormattedMessage id="menu.theme" defaultMessage="Theme" />
+              </MenubarSubTrigger>
+              <MenubarSubContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-32">
+                <MenubarRadioGroup value={theme} onValueChange={setTheme}>
+                  <MenubarRadioItem value="light" className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                    <FormattedMessage id="menu.themeLight" defaultMessage="Light" />
+                  </MenubarRadioItem>
+                  <MenubarRadioItem value="dark" className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                    <FormattedMessage id="menu.themeDark" defaultMessage="Dark" />
+                  </MenubarRadioItem>
+                  <MenubarRadioItem value="system" className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                    <FormattedMessage id="menu.themeSystem" defaultMessage="System" />
+                  </MenubarRadioItem>
+                </MenubarRadioGroup>
+              </MenubarSubContent>
+            </MenubarSub>
           </MenubarContent>
         </MenubarMenu>
 
         <MenubarMenu>
           <MenubarTrigger className="px-2 py-1 hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground text-foreground font-medium rounded-xs cursor-pointer">
-            View
+            <FormattedMessage id="menu.help" defaultMessage="Help" />
           </MenubarTrigger>
           <MenubarContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-36">
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Zoom In</MenubarItem>
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Zoom Out</MenubarItem>
-          </MenubarContent>
-        </MenubarMenu>
-
-        <MenubarMenu>
-          <MenubarTrigger className="px-2 py-1 hover:bg-accent hover:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground text-foreground font-medium rounded-xs cursor-pointer">
-            Help
-          </MenubarTrigger>
-          <MenubarContent className="bg-popover border-border rounded-xs text-[11px] p-0.5 text-popover-foreground min-w-36">
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Documentation</MenubarItem>
-            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">Version Info</MenubarItem>
+            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+              <FormattedMessage id="menu.documentation" defaultMessage="Documentation" />
+            </MenubarItem>
+            <MenubarItem className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+              <FormattedMessage id="menu.versionInfo" defaultMessage="Version Info" />
+            </MenubarItem>
           </MenubarContent>
         </MenubarMenu>
       </Menubar>

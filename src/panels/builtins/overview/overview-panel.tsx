@@ -1,5 +1,6 @@
 import type { OverviewPanelConfig, PanelComponentProps } from '@/panels/core/types'
 import { Clock, Code2, Database, Info, Radio } from 'lucide-react'
+import { FormattedMessage } from 'react-intl'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatBytes, formatDuration, formatNanoseconds } from '@/lib/time'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -16,28 +17,36 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
         <div className="p-3 bg-card border border-border/80 rounded-xl flex items-center gap-3 shadow-xs">
           <Database className="w-4 h-4 text-primary shrink-0" />
           <div>
-            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">File Size</div>
+            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
+              <FormattedMessage id="overview.fileSize" defaultMessage="File Size" />
+            </div>
             <div className="text-xs font-semibold mt-1 font-mono">{formatBytes(fileSummary.size)}</div>
           </div>
         </div>
         <div className="p-3 bg-card border border-border/80 rounded-xl flex items-center gap-3 shadow-xs">
           <Radio className="w-4 h-4 text-primary shrink-0" />
           <div>
-            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Messages</div>
+            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
+              <FormattedMessage id="overview.messages" defaultMessage="Messages" />
+            </div>
             <div className="text-xs font-semibold mt-1 font-mono">{fileSummary.messageCount.toLocaleString()}</div>
           </div>
         </div>
         <div className="p-3 bg-card border border-border/80 rounded-xl flex items-center gap-3 shadow-xs">
           <Clock className="w-4 h-4 text-primary shrink-0" />
           <div>
-            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Duration</div>
+            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
+              <FormattedMessage id="overview.duration" defaultMessage="Duration" />
+            </div>
             <div className="text-xs font-semibold mt-1 font-mono">{formatDuration(fileSummary.durationNs)}</div>
           </div>
         </div>
         <div className="p-3 bg-card border border-border/80 rounded-xl flex items-center gap-3 shadow-xs">
           <Info className="w-4 h-4 text-primary shrink-0" />
           <div>
-            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">Total Channels</div>
+            <div className="text-[9px] font-bold text-muted-foreground uppercase tracking-wide">
+              <FormattedMessage id="overview.totalChannels" defaultMessage="Total Channels" />
+            </div>
             <div className="text-xs font-semibold mt-1 font-mono">{fileSummary.channels.length}</div>
           </div>
         </div>
@@ -46,12 +55,12 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
       {/* Time Ranges banner */}
       <div className="p-3 bg-card border border-border/60 rounded-xl text-[10px] text-muted-foreground font-mono flex flex-wrap gap-x-6 gap-y-1.5 shrink-0 shadow-2xs">
         <span>
-          Start Time:
+          <FormattedMessage id="overview.startTime" defaultMessage="Start Time:" />
           <span className="font-semibold text-foreground select-all ml-1">{formatNanoseconds(fileSummary.startNs)}</span>
         </span>
         <span className="text-border/40 select-none">|</span>
         <span>
-          End Time:
+          <FormattedMessage id="overview.endTime" defaultMessage="End Time:" />
           <span className="font-semibold text-foreground select-all ml-1">{formatNanoseconds(fileSummary.endNs)}</span>
         </span>
       </div>
@@ -63,7 +72,7 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
           <div className="p-3 border-b border-border bg-card shrink-0 flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
               <Radio className="w-3.5 h-3.5 text-primary" />
-              Channel Definitions & Metadata
+              <FormattedMessage id="overview.channelDefinitions" defaultMessage="Channel Definitions & Metadata" />
             </h2>
           </div>
           <ScrollArea className="flex-1 min-h-0">
@@ -77,7 +86,8 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
                       {' '}
                       {ch.schemaName || 'None'}
                       {' '}
-                      (Schema ID:
+                      (
+                      <FormattedMessage id="overview.schemaId" defaultMessage="Schema ID:" />
                       {' '}
                       {ch.schemaId}
                       )
@@ -105,7 +115,9 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
           <div className="p-3 border-b border-border bg-card shrink-0">
             <h2 className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5">
               <Code2 className="w-3.5 h-3.5 text-primary" />
-              Schemas (
+              <FormattedMessage id="overview.schemas" defaultMessage="Schemas" />
+              {' '}
+              (
               {fileSummary.schemas.length}
               )
             </h2>
@@ -116,7 +128,7 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
               {fileSummary.schemas.length === 0
                 ? (
                     <div className="text-center py-12 text-muted-foreground text-xs">
-                      No schema records defined in this file.
+                      <FormattedMessage id="overview.noSchemas" defaultMessage="No schema records defined in this file." />
                     </div>
                   )
                 : (
@@ -128,7 +140,7 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
                               {schema.name}
                             </span>
                             <span className="text-[9px] text-muted-foreground font-mono mt-0.5 block truncate select-text">
-                              Encoding:
+                              <FormattedMessage id="overview.encoding" defaultMessage="Encoding:" />
                               {' '}
                               {schema.encoding}
                             </span>
@@ -145,7 +157,7 @@ export default function OverviewPanel(_props: PanelComponentProps<OverviewPanelC
                             <details className="group">
                               <summary className="text-[10px] text-primary cursor-pointer select-none hover:underline flex items-center gap-1">
                                 <span className="group-open:rotate-90 transition-transform inline-block">▸</span>
-                                View definition text
+                                <FormattedMessage id="overview.viewDefinition" defaultMessage="View definition text" />
                               </summary>
                               <pre className="mt-1.5 p-2 bg-card rounded border border-border/40 font-mono text-[9px] text-muted-foreground select-text overflow-auto max-h-48 whitespace-pre-wrap leading-tight break-all">
                                 {schema.dataText}

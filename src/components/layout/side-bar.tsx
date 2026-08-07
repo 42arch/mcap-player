@@ -1,5 +1,6 @@
 import { FileText, Info, Radio, Search, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -8,6 +9,7 @@ import { usePlayerStore } from '@/stores/use-player-store'
 import PanelSettingsHost from './panel-settings-host'
 
 export default function SideBar() {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const selectedTopic = usePlayerStore(state => state.selectedTopic)
   const setSelectedTopic = usePlayerStore(state => state.setSelectedTopic)
@@ -19,7 +21,9 @@ export default function SideBar() {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center text-muted-foreground bg-card">
         <Radio className="w-8 h-8 mb-3 text-muted-foreground/30 animate-pulse" />
-        <p className="text-xs font-semibold">No MCAP File Loaded</p>
+        <p className="text-xs font-semibold">
+          <FormattedMessage id="sidebar.noMcapFile" defaultMessage="No MCAP File Loaded" />
+        </p>
         <p className="text-[10px] text-muted-foreground/60 mt-1.5 max-w-46.25 leading-relaxed">
           Select
           {' '}
@@ -59,14 +63,14 @@ export default function SideBar() {
             className="h-full w-24 rounded-none px-3.5 gap-1.5 text-[11px] font-medium text-muted-foreground border-r border-border/40 hover:bg-tab-hover hover:text-accent-foreground data-[state=active]:bg-background dark:data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:text-foreground transition-colors cursor-pointer"
           >
             <Radio className="w-3.5 h-3.5 opacity-70" />
-            Topics
+            <FormattedMessage id="sidebar.topics" defaultMessage="Topics" />
           </TabsTrigger>
           <TabsTrigger
             value="settings"
             className="h-full w-24 rounded-none px-3.5 gap-1.5 text-[11px] font-medium text-muted-foreground border-r border-border/40 hover:bg-tab-hover hover:text-accent-foreground data-[state=active]:bg-background dark:data-[state=active]:bg-background data-[state=active]:text-foreground dark:data-[state=active]:text-foreground transition-colors cursor-pointer"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 opacity-70" />
-            Settings
+            <FormattedMessage id="sidebar.settings" defaultMessage="Settings" />
           </TabsTrigger>
         </TabsList>
       </div>
@@ -78,7 +82,7 @@ export default function SideBar() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
               type="text"
-              placeholder="Filter topics..."
+              placeholder={intl.formatMessage({ id: 'sidebar.searchPlaceholder', defaultMessage: 'Filter topics...' })}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-8 text-xs"

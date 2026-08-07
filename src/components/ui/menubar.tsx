@@ -123,9 +123,9 @@ function MenubarCheckboxItem({
       checked={checked}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center [&_svg:not([class*='size-'])]:size-3">
+      <span className="pointer-events-none absolute left-2 flex size-3 items-center justify-center [&_svg:not([class*='size-'])]:size-3">
         <MenubarPrimitive.ItemIndicator>
-          <CheckIcon />
+          <CheckIcon className="size-3" />
         </MenubarPrimitive.ItemIndicator>
       </span>
       {children}
@@ -151,9 +151,9 @@ function MenubarRadioItem({
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-4 items-center justify-center [&_svg:not([class*='size-'])]:size-4">
+      <span className="pointer-events-none absolute right-2 flex size-3 items-center justify-center [&_svg:not([class*='size-'])]:size-4">
         <MenubarPrimitive.ItemIndicator>
-          <CheckIcon />
+          <CheckIcon className="size-3" />
         </MenubarPrimitive.ItemIndicator>
       </span>
       {children}
