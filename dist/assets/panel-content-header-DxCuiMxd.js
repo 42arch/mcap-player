@@ -1,1 +1,0 @@
-import{j as n}from"./index-Cmx5liSd.js";function r({actions:e}){return e?n.jsx("div",{className:"mcap-panel-content-header",children:n.jsx("div",{className:"mcap-panel-content-header__actions",children:e})}):null}export{r as P};

@@ -388,78 +388,88 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
         {/* Floating Vertical Legend Overlay */}
         {activeSeries.length > 0 && (
           <div className="absolute top-3 right-3 z-20 select-none font-mono text-[10px]">
-            {legendExpanded ? (
-              <div className="bg-popover/90 border border-border/80 text-popover-foreground rounded-md p-2 shadow-lg backdrop-blur-xs max-w-56 flex flex-col gap-1 transition-all duration-200">
-                <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-1 px-0.5 text-muted-foreground font-semibold">
-                  <span>Legend ({activeSeries.length})</span>
+            {legendExpanded
+              ? (
+                  <div className="bg-popover/90 border border-border/80 text-popover-foreground rounded-md p-2 shadow-lg backdrop-blur-xs max-w-56 flex flex-col gap-1 transition-all duration-200">
+                    <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-1 px-0.5 text-muted-foreground font-semibold">
+                      <span>
+                        Legend (
+                        {activeSeries.length}
+                        )
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setLegendExpanded(false)}
+                        className="p-0.5 hover:bg-muted/80 rounded transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
+                        title="Collapse Legend"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto pr-0.5">
+                      {activeSeries.map((s) => {
+                        const isHidden = hiddenSeriesIds.has(s.id)
+                        return (
+                          <div
+                            key={s.id}
+                            onClick={() => toggleSeriesVisibility(s.id)}
+                            className={cn(
+                              'flex items-center justify-between gap-2 px-1.5 py-1 rounded cursor-pointer transition-colors',
+                              isHidden ? 'opacity-40 bg-muted/20 hover:bg-muted/40' : 'hover:bg-muted/60 bg-muted/30',
+                            )}
+                            title={`${s.topic}.${s.path}`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  toggleSeriesVisibility(s.id)
+                                }}
+                                className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                                title={isHidden ? 'Show series' : 'Hide series'}
+                              >
+                                {isHidden
+                                  ? (
+                                      <EyeClosed className="w-3 h-3 text-muted-foreground/60" />
+                                    )
+                                  : (
+                                      <Eye className="w-3 h-3 text-primary" />
+                                    )}
+                              </button>
+                              <span
+                                className="w-1.5 h-1.5 rounded-full shrink-0"
+                                style={{ backgroundColor: s.color }}
+                              />
+                              <span className="truncate font-medium">
+                                {s.name || s.path}
+                              </span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              : (
                   <button
                     type="button"
-                    onClick={() => setLegendExpanded(false)}
-                    className="p-0.5 hover:bg-muted/80 rounded transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
-                    title="Collapse Legend"
+                    onClick={() => setLegendExpanded(true)}
+                    className="flex items-center gap-1.5 bg-popover/90 border border-border/80 text-popover-foreground rounded-md px-2 py-1 shadow-md backdrop-blur-xs hover:bg-popover transition-colors cursor-pointer"
+                    title="Expand Legend"
                   >
-                    <ChevronRight className="w-3.5 h-3.5" />
+                    <Layers className="w-3 h-3 text-primary" />
+                    <span className="font-semibold text-[10px]">Legend</span>
+                    {hiddenSeriesIds.size > 0 && (
+                      <span className="bg-primary/20 text-primary text-[9px] px-1 rounded font-bold">
+                        {hiddenSeriesIds.size}
+                        {' '}
+                        hidden
+                      </span>
+                    )}
                   </button>
-                </div>
-
-                <div className="flex flex-col gap-0.5 max-h-48 overflow-y-auto pr-0.5">
-                  {activeSeries.map((s) => {
-                    const isHidden = hiddenSeriesIds.has(s.id)
-                    return (
-                      <div
-                        key={s.id}
-                        onClick={() => toggleSeriesVisibility(s.id)}
-                        className={cn(
-                          'flex items-center justify-between gap-2 px-1.5 py-1 rounded cursor-pointer transition-colors',
-                          isHidden ? 'opacity-40 bg-muted/20 hover:bg-muted/40' : 'hover:bg-muted/60 bg-muted/30',
-                        )}
-                        title={`${s.topic}.${s.path}`}
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              toggleSeriesVisibility(s.id)
-                            }}
-                            className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
-                            title={isHidden ? 'Show series' : 'Hide series'}
-                          >
-                            {isHidden ? (
-                              <EyeClosed className="w-3 h-3 text-muted-foreground/60" />
-                            ) : (
-                              <Eye className="w-3 h-3 text-primary" />
-                            )}
-                          </button>
-                          <span
-                            className="w-1.5 h-1.5 rounded-full shrink-0"
-                            style={{ backgroundColor: s.color }}
-                          />
-                          <span className="truncate font-medium">
-                            {s.name || s.path}
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setLegendExpanded(true)}
-                className="flex items-center gap-1.5 bg-popover/90 border border-border/80 text-popover-foreground rounded-md px-2 py-1 shadow-md backdrop-blur-xs hover:bg-popover transition-colors cursor-pointer"
-                title="Expand Legend"
-              >
-                <Layers className="w-3 h-3 text-primary" />
-                <span className="font-semibold text-[10px]">Legend</span>
-                {hiddenSeriesIds.size > 0 && (
-                  <span className="bg-primary/20 text-primary text-[9px] px-1 rounded font-bold">
-                    {hiddenSeriesIds.size} hidden
-                  </span>
                 )}
-              </button>
-            )}
           </div>
         )}
 
@@ -504,4 +514,3 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
     </div>
   )
 }
-

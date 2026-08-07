@@ -60,3 +60,12 @@ export interface PanelInstance<C extends PanelConfig = PanelConfig> {
   configVersion: number
   config: C
 }
+
+export interface PanelLayoutExportData {
+  version: 1
+  appName: 'mcapview'
+  exportedAt: string
+  panelsById: Record<PanelId, PanelInstance>
+  panelOrder: PanelId[]
+  dockviewLayout: Record<string, unknown>
+}

@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback } from 'react'
+import { FormattedMessage } from 'react-intl'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -31,29 +32,33 @@ import {
   useRegisteredPanels,
 } from '@/panels/core/panel-registry'
 import { usePanelStore } from '@/stores/use-panel-store'
-import { getPanelAppearance, PanelTypeIcon } from './panel-appearance'
+import { PanelTypeIcon } from './panel-appearance'
 
 type PanelPlacement = 'replace' | 'right' | 'below' | 'within'
 
 const placementOptions = [
   {
     placement: 'replace',
-    label: 'Replace current panel',
+    id: 'panel.placementReplace',
+    defaultMessage: 'Replace current panel',
     Icon: ArrowLeftRight,
   },
   {
     placement: 'right',
-    label: 'Add to the right',
+    id: 'panel.placementRight',
+    defaultMessage: 'Add to the right',
     Icon: ArrowRight,
   },
   {
     placement: 'below',
-    label: 'Add below',
+    id: 'panel.placementBelow',
+    defaultMessage: 'Add below',
     Icon: ArrowDown,
   },
   {
     placement: 'within',
-    label: 'Add to this group',
+    id: 'panel.placementWithin',
+    defaultMessage: 'Add to this group',
     Icon: Layers,
   },
 ] as const
@@ -122,7 +127,9 @@ export default function PanelGroupActions({
             <SlidersHorizontal data-icon="inline-start" className="w-3.5 h-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">Panel settings</TooltipContent>
+        <TooltipContent side="bottom">
+          <FormattedMessage id="panel.settings" defaultMessage="Panel settings" />
+        </TooltipContent>
       </Tooltip>
 
       <DropdownMenu>
@@ -138,13 +145,16 @@ export default function PanelGroupActions({
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Add panel</TooltipContent>
+          <TooltipContent side="bottom">
+            <FormattedMessage id="panel.addPanel" defaultMessage="Add panel" />
+          </TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuLabel>Add panel</DropdownMenuLabel>
+          <DropdownMenuLabel>
+            <FormattedMessage id="panel.addPanel" defaultMessage="Add panel" />
+          </DropdownMenuLabel>
           <DropdownMenuGroup>
             {panels.map((panel) => {
-              const appearance = getPanelAppearance(panel.type, panel.title)
               return (
                 <DropdownMenuSub key={panel.type}>
                   <DropdownMenuSubTrigger>
@@ -153,17 +163,19 @@ export default function PanelGroupActions({
                       fallbackTitle={panel.title}
                       className="w-3.5 h-3.5"
                     />
-                    <span className="truncate">{appearance.shortTitle}</span>
+                    <span className="truncate">
+                      <FormattedMessage id={`panel.${panel.type}.title`} defaultMessage={panel.title} />
+                    </span>
                   </DropdownMenuSubTrigger>
                   <DropdownMenuSubContent className="w-52">
                     <DropdownMenuGroup>
-                      {placementOptions.map(({ placement, label, Icon }) => (
+                      {placementOptions.map(({ placement, id, defaultMessage, Icon }) => (
                         <DropdownMenuItem
                           key={placement}
                           onSelect={() => addPanelAt(panel.type, placement)}
                         >
                           <Icon className="w-3.5 h-3.5" />
-                          {label}
+                          <FormattedMessage id={id} defaultMessage={defaultMessage} />
                         </DropdownMenuItem>
                       ))}
                     </DropdownMenuGroup>
@@ -187,7 +199,9 @@ export default function PanelGroupActions({
             <X data-icon="inline-start" className="w-3.5 h-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">Close panel</TooltipContent>
+        <TooltipContent side="bottom">
+          <FormattedMessage id="panel.closePanel" defaultMessage="Close panel" />
+        </TooltipContent>
       </Tooltip>
     </div>
   )

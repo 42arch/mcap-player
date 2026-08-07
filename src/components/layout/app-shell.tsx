@@ -5,6 +5,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable'
+import { Toaster } from '@/components/ui/sonner'
 import MainContent from './main-content'
 import MenuBar from './menu-bar'
 import Playback from './playback'
@@ -59,6 +60,8 @@ export default function AppShell() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+
+      <Toaster />
     </div>
   )
 }

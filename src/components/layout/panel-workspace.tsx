@@ -23,6 +23,7 @@ export default function PanelWorkspace() {
   const removePanel = usePanelStore(state => state.removePanel)
   const setActivePanel = usePanelStore(state => state.setActivePanel)
   const setSelectedPanel = usePanelStore(state => state.setSelectedPanel)
+  const setDockviewApi = usePanelStore(state => state.setDockviewApi)
   const [api, setApi] = useState<DockviewApi | null>(null)
 
   const addPanelToWorkspace = useCallback((type: string) => {
@@ -88,7 +89,10 @@ export default function PanelWorkspace() {
     }
   }, [api, removePanel, setActivePanel, setSelectedPanel])
 
-  const onReady = useCallback((event: DockviewReadyEvent) => setApi(event.api), [])
+  const onReady = useCallback((event: DockviewReadyEvent) => {
+    setApi(event.api)
+    setDockviewApi(event.api)
+  }, [setDockviewApi])
 
   return (
     <div className="mcap-dockview h-full min-h-0 bg-background">

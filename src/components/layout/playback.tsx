@@ -1,6 +1,7 @@
 import { FastForward, Pause, Play, Rewind } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -14,6 +15,7 @@ import { usePlaybackControls } from '@/hooks/use-playback'
 import { formatDuration, formatNanoseconds } from '@/lib/time'
 
 export default function Playback() {
+  const intl = useIntl()
   const [scrubSeconds, setScrubSeconds] = useState<number | null>(null)
   const [hoverInfo, setHoverInfo] = useState<{ x: number, seconds: number } | null>(null)
   const sliderContainerRef = useRef<HTMLDivElement>(null)
@@ -151,7 +153,9 @@ export default function Playback() {
         {/* Left: Speed Selector */}
         <div className="flex-1 flex items-center justify-start">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
-            <span className="text-[10px] text-muted-foreground/60 uppercase">Speed:</span>
+            <span className="text-[10px] text-muted-foreground/60 uppercase">
+              <FormattedMessage id="playback.speed" defaultMessage="Speed:" />
+            </span>
             <Select
               value={String(playbackSpeed)}
               onValueChange={val => setPlaybackSpeed(Number.parseFloat(val))}
@@ -180,7 +184,7 @@ export default function Playback() {
             size="icon"
             onClick={() => stepBackward(1)}
             disabled={durationSeconds === 0}
-            title="Backward 1s"
+            title={intl.formatMessage({ id: 'playback.stepBackward', defaultMessage: 'Backward 1s' })}
           >
             <Rewind className="w-3.5 h-3.5" />
           </Button>
@@ -190,7 +194,9 @@ export default function Playback() {
             size="icon"
             onClick={() => setIsPlaying(!isPlaying)}
             disabled={durationSeconds === 0}
-            title={isPlaying ? 'Pause' : 'Play'}
+            title={isPlaying
+              ? intl.formatMessage({ id: 'playback.pause', defaultMessage: 'Pause' })
+              : intl.formatMessage({ id: 'playback.play', defaultMessage: 'Play' })}
           >
             {isPlaying
               ? (
@@ -206,7 +212,7 @@ export default function Playback() {
             size="icon"
             onClick={() => stepForward(1)}
             disabled={durationSeconds === 0}
-            title="Forward 1s"
+            title={intl.formatMessage({ id: 'playback.stepForward', defaultMessage: 'Forward 1s' })}
           >
             <FastForward className="w-3.5 h-3.5" />
           </Button>
