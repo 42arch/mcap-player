@@ -3,7 +3,7 @@ import type { RemoteLoadProgress, RemoteTimeRange } from '@/core/sources/remote-
 import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { TimelineTopicData } from '@/core/workers/timeline-data'
 import type { BackfillClass } from '@/core/workers/topic-classifier'
-import { wrap } from 'comlink'
+import { transfer, wrap } from 'comlink'
 import { resetDatasetResources } from '@/core/dataset-resource-registry'
 import { PlaybackBatchAccumulator } from '@/core/playback-batch-accumulator'
 import { setPlaybackElapsedNs } from '@/core/playback-time-store'
@@ -36,6 +36,8 @@ const REMOTE_BUFFER_TARGET_PERCENT = 10n
 export class PlaybackController {
   private worker: any = null
   private seekWorker: any = null
+  private remoteCacheWorker: any = null
+  private remoteCacheSessionId: string | null = null
   private clock: PlaybackClock | null = null
   private animationFrameId: number | null = null
   private lastTickTimeNs: bigint = 0n
@@ -65,6 +67,13 @@ export class PlaybackController {
   private isRemoteFullDownloadRunning = false
 
   constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => {
+        // This is best-effort only: the cache worker clears any leftovers when a
+        // future session starts, so an abrupt browser shutdown cannot revive data.
+        void this.destroyRemoteCacheSession()
+      })
+    }
     globalMessagePipeline.onSubscriptionsChanged((panelId) => {
       this.pendingBackfillPanelIds.add(panelId)
       if (this.backfillScheduled) {
@@ -140,6 +149,50 @@ export class PlaybackController {
     return this.seekWorker
   }
 
+  private getRemoteCacheWorker() {
+    if (!this.remoteCacheWorker) {
+      const rawWorker = new Worker(
+        new URL('./workers/remote-cache.worker.ts', import.meta.url),
+        { type: 'module' },
+      )
+      this.remoteCacheWorker = wrap(rawWorker)
+    }
+    return this.remoteCacheWorker
+  }
+
+  private async prepareRemoteCache(source: Extract<McapSource, { kind: 'remote' }>, workers: readonly any[]): Promise<McapSource> {
+    await this.destroyRemoteCacheSession()
+    const cacheWorker = this.getRemoteCacheWorker()
+    const { sessionId, size } = await cacheWorker.createSession(source.url)
+    this.remoteCacheSessionId = sessionId
+    try {
+      await Promise.all(workers.map(async (worker) => {
+        const channel = new MessageChannel()
+        await cacheWorker.connect(sessionId, transfer(channel.port1, [channel.port1]))
+        await worker.setRemoteBlockCache(transfer({ port: channel.port2, size }, [channel.port2]))
+      }))
+    }
+    catch (error) {
+      await this.destroyRemoteCacheSession()
+      throw error
+    }
+    return { ...source, knownSize: size }
+  }
+
+  private async destroyRemoteCacheSession(): Promise<void> {
+    const sessionId = this.remoteCacheSessionId
+    this.remoteCacheSessionId = null
+    if (!sessionId || !this.remoteCacheWorker) {
+      return
+    }
+    try {
+      await this.remoteCacheWorker.destroySession(sessionId)
+    }
+    catch (error) {
+      console.warn('Failed to clear the OPFS session cache:', error)
+    }
+  }
+
   async loadFile(file: File) {
     await this.loadSource({ kind: 'local', file })
   }
@@ -162,16 +215,20 @@ export class PlaybackController {
     this.timelineDataPromise = null
     const worker = this.getWorker()
     const seekWorker = this.getSeekWorker()
+    await this.destroyRemoteCacheSession()
+    const workerSource = source.kind === 'remote'
+      ? await this.prepareRemoteCache(source, [worker, seekWorker])
+      : source
     let playbackSummary: any
     let seekSummary: any
     try {
       [playbackSummary, seekSummary] = await Promise.all([
-        worker.initialize(source, {
+        worker.initialize(workerSource, {
           buildSpatialIndex: false,
           remoteCacheBytes: PLAYBACK_REMOTE_CACHE_BYTES,
         }),
-        seekWorker.initialize(source, {
-          buildSpatialIndex: source.kind === 'local',
+        seekWorker.initialize(workerSource, {
+          buildSpatialIndex: workerSource.kind === 'local',
           remoteCacheBytes: SEEK_REMOTE_CACHE_BYTES,
         }),
       ])
@@ -180,12 +237,13 @@ export class PlaybackController {
       if (loadGeneration !== this.loadGeneration) {
         return
       }
+      await this.destroyRemoteCacheSession()
       throw error
     }
     if (loadGeneration !== this.loadGeneration) {
       return
     }
-    const summary = source.kind === 'local' ? seekSummary : playbackSummary
+    const summary = workerSource.kind === 'local' ? seekSummary : playbackSummary
     this.fileSummary = summary
     this.clock = new PlaybackClock(summary.startNs, summary.endNs)
     this.lastTickTimeNs = summary.startNs
@@ -193,7 +251,7 @@ export class PlaybackController {
     // update Zustand store
     const store = usePlayerStore.getState()
     store.setFileSummary(summary)
-    if (source.kind === 'remote') {
+    if (workerSource.kind === 'remote') {
       this.isRemoteSource = true
       this.startRemoteProgressPolling(loadGeneration)
     }
@@ -215,6 +273,7 @@ export class PlaybackController {
     resetDatasetResources()
     setPlaybackElapsedNs(0n)
     usePlayerStore.getState().setFileSummary(null)
+    void this.destroyRemoteCacheSession()
     this.worker?.closeSource().catch((error: unknown) => {
       console.warn('Failed to close playback worker source:', error)
     })
@@ -690,7 +749,7 @@ export class PlaybackController {
     }
     catch (error) {
       if (generation === this.loadGeneration) {
-        console.warn('Failed to persist all remote MCAP blocks:', error)
+        console.warn('Failed to cache all remote MCAP blocks:', error)
       }
     }
     finally {

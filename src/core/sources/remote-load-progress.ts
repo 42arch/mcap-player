@@ -23,7 +23,7 @@ export interface RemoteLoadProgress {
   /** Blocks currently resident in this worker's LRU cache. */
   residentBytes: number
   residentByteRanges: ByteRange[]
-  /** Blocks available to every worker through IndexedDB. */
+  /** Blocks available to every worker through the current OPFS session cache. */
   persistedBytes: number
   persistedByteRanges: ByteRange[]
   persistedPercent: number

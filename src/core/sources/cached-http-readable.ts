@@ -1,8 +1,8 @@
 import type { IReadable } from '@mcap/core'
 import type { ByteRange } from './remote-load-progress'
 import type { PersistentRemoteBlockStore, RemoteBlockCacheIdentity } from './persistent-remote-block-store'
+import type { SessionBlockProvider } from './session-opfs-block-provider'
 import { getRangeByteLength, mergeByteRanges } from './remote-load-progress'
-import { getDefaultRemoteBlockStore } from './persistent-remote-block-store'
 
 const MIB = 1024 * 1024
 const DEFAULT_BLOCK_SIZE = 4 * MIB
@@ -20,6 +20,8 @@ export interface CachedHttpReadableOptions {
   retryAttempts?: number
   fetch?: FetchLike
   persistentBlockStore?: PersistentRemoteBlockStore | null
+  /** A session-scoped shared cache supplied by the remote cache worker. */
+  blockProvider?: SessionBlockProvider
 }
 
 interface CachedBlock {
@@ -72,6 +74,7 @@ export class CachedHttpReadable implements IReadable {
   private readonly cacheSizeBytes: number
   private readonly retryAttempts: number
   private readonly persistentBlockStore: PersistentRemoteBlockStore | null
+  private readonly blockProvider: SessionBlockProvider | undefined
   private readonly abortController = new AbortController()
   private readonly cache = new Map<number, CachedBlock>()
   private readonly inFlightBlocks = new Map<number, Promise<Uint8Array>>()
@@ -90,9 +93,10 @@ export class CachedHttpReadable implements IReadable {
     this.blockSizeBytes = Math.max(1, Math.floor(options.blockSizeBytes ?? DEFAULT_BLOCK_SIZE))
     this.cacheSizeBytes = Math.max(this.blockSizeBytes, Math.floor(options.cacheSizeBytes ?? DEFAULT_CACHE_SIZE))
     this.retryAttempts = Math.max(1, Math.floor(options.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS))
-    this.persistentBlockStore = options.persistentBlockStore === undefined
-      ? getDefaultRemoteBlockStore()
-      : options.persistentBlockStore
+    // Production remote sources use blockProvider. Keep an explicitly supplied
+    // store only for compatibility with callers that provide one themselves.
+    this.persistentBlockStore = options.persistentBlockStore ?? null
+    this.blockProvider = options.blockProvider
     if (options.knownSize !== undefined) {
       if (!Number.isSafeInteger(options.knownSize) || options.knownSize <= 0) {
         throw new Error('Remote MCAP size must be a positive safe integer.')
@@ -188,6 +192,10 @@ export class CachedHttpReadable implements IReadable {
   }
 
   async getPersistedRanges(): Promise<ByteRange[]> {
+    if (this.blockProvider) {
+      const progress = await this.blockProvider.getProgress()
+      return this.getRangesForBlocks(progress.storedBlockIndexes)
+    }
     await this.initializePersistentBlocks()
     return this.getRangesForBlocks(this.persistentBlocks)
   }
@@ -236,6 +244,10 @@ export class CachedHttpReadable implements IReadable {
 
   private async getSize(): Promise<number> {
     if (this.fileSize !== undefined) {
+      return this.fileSize
+    }
+    if (this.blockProvider) {
+      this.fileSize = await this.blockProvider.getSize()
       return this.fileSize
     }
     if (!this.sizePromise) {
@@ -292,6 +304,9 @@ export class CachedHttpReadable implements IReadable {
   }
 
   private async fetchBlock(blockIndex: number): Promise<Uint8Array> {
+    if (this.blockProvider) {
+      return this.blockProvider.getBlock(blockIndex)
+    }
     const size = await this.getSize()
     const start = blockIndex * this.blockSizeBytes
     const end = Math.min(size, start + this.blockSizeBytes) - 1

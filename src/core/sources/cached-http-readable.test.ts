@@ -1,6 +1,7 @@
 import { McapIndexedReader, McapWriter } from '@mcap/core'
 import { describe, expect, it, vi } from 'vitest'
 import type { PersistentRemoteBlockStore, RemoteBlockCacheIdentity } from './persistent-remote-block-store'
+import type { SessionBlockProvider } from './session-opfs-block-provider'
 import { CachedHttpReadable } from './cached-http-readable'
 
 class MemoryWritable {
@@ -51,6 +52,28 @@ function createMemoryBlockStore(): PersistentRemoteBlockStore {
       .filter(key => key.startsWith(`${identity.url}:${identity.size}:${identity.validator ?? ''}:`))
       .map(key => Number(key.slice(key.lastIndexOf(':') + 1))),
     runExclusive: async (_identity, _blockIndex, task) => task(),
+  }
+}
+
+function createSessionBlockProvider(bytes: Uint8Array, blockSize: number): SessionBlockProvider {
+  const blocks = new Map<number, Uint8Array>()
+  return {
+    getSize: async () => bytes.byteLength,
+    getBlock: async (blockIndex) => {
+      const cached = blocks.get(blockIndex)
+      if (cached) {
+        return cached.slice()
+      }
+      const start = blockIndex * blockSize
+      const data = bytes.slice(start, Math.min(bytes.byteLength, start + blockSize))
+      blocks.set(blockIndex, data)
+      return data.slice()
+    },
+    getProgress: async () => ({
+      storedBlockIndexes: Array.from(blocks.keys()),
+      residentBlockIndexes: Array.from(blocks.keys()),
+    }),
+    close: () => undefined,
   }
 }
 
@@ -178,6 +201,22 @@ describe('cachedHttpReadable', () => {
 
     expect(fetch).toHaveBeenCalledOnce()
     await expect(second.getPersistedBytes()).resolves.toBe(4)
+  })
+
+  it('uses the shared session block provider instead of making HTTP requests', async () => {
+    const bytes = Uint8Array.from({ length: 8 }, (_, index) => index)
+    const fetch = vi.fn()
+    const readable = new CachedHttpReadable('https://example.com/run.mcap', {
+      fetch,
+      knownSize: bytes.length,
+      blockSizeBytes: 4,
+      persistentBlockStore: null,
+      blockProvider: createSessionBlockProvider(bytes, 4),
+    })
+
+    await expect(readable.read(2n, 5n)).resolves.toEqual(Uint8Array.from([2, 3, 4, 5, 6]))
+    await expect(readable.getPersistedRanges()).resolves.toEqual([{ start: 0, end: 8 }])
+    expect(fetch).not.toHaveBeenCalled()
   })
 
   it('can persist every block in a remote file for offline reuse', async () => {

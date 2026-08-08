@@ -287,12 +287,12 @@ export default function Playback() {
                     ? 'playback.remoteCachingAll'
                     : 'playback.remoteCacheAll',
                 defaultMessage: remoteLoadProgress.isPersistedComplete
-                  ? 'Available offline'
+                  ? 'Session cache complete'
                   : isRemoteFullDownloadRunning
                     ? 'Caching all data…'
                     : 'Cache all data',
               })}\n${intl.formatMessage(
-                { id: 'playback.remoteLoadProgress', defaultMessage: 'Fetched {fetched} / {total} ({fetchedPercent}%) · Stored {stored} ({storedPercent}%)' },
+                { id: 'playback.remoteLoadProgress', defaultMessage: 'Fetched {fetched} / {total} ({fetchedPercent}%) · Session cache {stored} ({storedPercent}%)' },
                 {
                   fetched: formatBytes(remoteLoadProgress.downloadedBytes),
                   total: formatBytes(remoteLoadProgress.totalBytes),

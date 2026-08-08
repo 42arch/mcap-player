@@ -12,6 +12,7 @@ import { expose, transfer } from 'comlink'
 import { isH264Format } from '@/core/parsers/h264'
 import { createNumericValueAccessor } from '@/core/parsers/value-extractor'
 import { CachedHttpReadable } from '@/core/sources/cached-http-readable'
+import { PortSessionBlockProvider } from '@/core/sources/session-opfs-block-provider'
 import { getPlayableTimeRanges, getRangeByteLength, mergeByteRanges } from '@/core/sources/remote-load-progress'
 import {
   getTransferableBuffers,
@@ -26,6 +27,11 @@ type BackfillPhase = 'all' | BackfillClass
 interface InitializeOptions {
   buildSpatialIndex?: boolean
   remoteCacheBytes?: number
+}
+
+interface RemoteBlockCacheConnection {
+  port: MessagePort
+  size: number
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -68,6 +74,7 @@ if (workerBuffer === undefined || workerBuffer === null) {
 class McapWorker {
   private reader: McapIndexedReader | null = null
   private remoteReadable: CachedHttpReadable | null = null
+  private remoteBlockProvider: PortSessionBlockProvider | null = null
   private chunkCoverage: IndexedChunkCoverage[] = []
   private decompressHandlers: any = null
   private cursor = new MessageCursor()
@@ -83,10 +90,19 @@ class McapWorker {
   private canceledPlotRequestIds = new Set<number>()
   private timelineGeneration = 0
 
+  setRemoteBlockCache(connection: RemoteBlockCacheConnection) {
+    this.remoteBlockProvider?.close()
+    this.remoteBlockProvider = new PortSessionBlockProvider(connection.port, connection.size)
+  }
+
   async initialize(source: McapSource, options: InitializeOptions = {}) {
     const initializeGeneration = ++this.initializeGeneration
     this.remoteReadable?.close()
     this.remoteReadable = null
+    if (source.kind === 'local') {
+      this.remoteBlockProvider?.close()
+      this.remoteBlockProvider = null
+    }
     this.chunkCoverage = []
     this.reader = null
     this.cursor.setReader(null)
@@ -104,6 +120,8 @@ class McapWorker {
       : new CachedHttpReadable(source.url, {
           knownSize: source.knownSize,
           cacheSizeBytes: options.remoteCacheBytes,
+          persistentBlockStore: null,
+          blockProvider: this.remoteBlockProvider ?? undefined,
         })
     if (source.kind === 'remote') {
       this.remoteReadable = readable as CachedHttpReadable
@@ -224,6 +242,8 @@ class McapWorker {
     this.activePlotRequestIds.forEach(requestId => this.canceledPlotRequestIds.add(requestId))
     this.remoteReadable?.close()
     this.remoteReadable = null
+    this.remoteBlockProvider?.close()
+    this.remoteBlockProvider = null
     this.chunkCoverage = []
     this.reader = null
     this.cursor.setReader(null)
@@ -270,7 +290,7 @@ class McapWorker {
     return this.getLoadProgress()
   }
 
-  /** Persists every byte block so later seek workers can avoid HTTP requests. */
+  /** Caches every byte block in the shared session so seek workers avoid HTTP requests. */
   async downloadAllRemoteBlocks(): Promise<RemoteLoadProgress | null> {
     const readable = this.remoteReadable
     if (!readable) {
