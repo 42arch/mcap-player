@@ -15,11 +15,21 @@ export interface RemoteTimeRange {
 }
 
 export interface RemoteLoadProgress {
+  /** Blocks fetched or read by this worker during the current source session. */
   downloadedBytes: number
   totalBytes: number
   percent: number
   downloadedByteRanges: ByteRange[]
+  /** Blocks currently resident in this worker's LRU cache. */
+  residentBytes: number
+  residentByteRanges: ByteRange[]
+  /** Blocks available to every worker through IndexedDB. */
+  persistedBytes: number
+  persistedByteRanges: ByteRange[]
+  persistedPercent: number
+  isPersistedComplete: boolean
   playableTimeRanges: RemoteTimeRange[]
+  hasIndexedChunkCoverage: boolean
 }
 
 const DEFAULT_MAX_CONTIGUOUS_GAP_NS = 750_000_000n
@@ -74,4 +84,17 @@ export function getPlayableTimeRanges(
     }
   }
   return result
+}
+
+/** Returns the end of the continuous playable range containing `timeNs`. */
+export function getPlayableRangeEnd(
+  ranges: readonly RemoteTimeRange[],
+  timeNs: bigint,
+): bigint | null {
+  for (const range of ranges) {
+    if (range.startNs <= timeNs && range.endNs >= timeNs) {
+      return range.endNs
+    }
+  }
+  return null
 }

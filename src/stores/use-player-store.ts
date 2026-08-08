@@ -84,6 +84,8 @@ interface PlayerStore {
   loadingMessage: string
   error: string | null
   remoteLoadProgress: RemoteLoadProgress | null
+  isRemoteBuffering: boolean
+  isRemoteFullDownloadRunning: boolean
 
   // Playback state
   isPlaying: boolean
@@ -96,6 +98,8 @@ interface PlayerStore {
   setIsLoading: (loading: boolean, message?: string) => void
   setError: (error: string | null) => void
   setRemoteLoadProgress: (progress: RemoteLoadProgress | null) => void
+  setIsRemoteBuffering: (buffering: boolean) => void
+  setIsRemoteFullDownloadRunning: (running: boolean) => void
 
   setIsPlaying: (playing: boolean) => void
   setPlaybackSpeed: (speed: number) => void
@@ -108,6 +112,8 @@ export const usePlayerStore = create<PlayerStore>(set => ({
   loadingMessage: '',
   error: null,
   remoteLoadProgress: null,
+  isRemoteBuffering: false,
+  isRemoteFullDownloadRunning: false,
 
   isPlaying: false,
   playbackSpeed: 1.0,
@@ -122,11 +128,14 @@ export const usePlayerStore = create<PlayerStore>(set => ({
       remoteLoadProgress: null,
       isPlaying: false,
       selectedTopic: null,
+      isRemoteFullDownloadRunning: false,
     }),
   setIsLoading: (loading, message = '') =>
     set({ isLoading: loading, loadingMessage: message }),
   setError: error => set({ error, isLoading: false }),
   setRemoteLoadProgress: remoteLoadProgress => set({ remoteLoadProgress }),
+  setIsRemoteBuffering: isRemoteBuffering => set({ isRemoteBuffering }),
+  setIsRemoteFullDownloadRunning: isRemoteFullDownloadRunning => set({ isRemoteFullDownloadRunning }),
 
   setIsPlaying: playing => set({ isPlaying: playing }),
   setPlaybackSpeed: speed => set({ playbackSpeed: speed }),

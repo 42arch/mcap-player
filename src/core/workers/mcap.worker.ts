@@ -12,7 +12,7 @@ import { expose, transfer } from 'comlink'
 import { isH264Format } from '@/core/parsers/h264'
 import { createNumericValueAccessor } from '@/core/parsers/value-extractor'
 import { CachedHttpReadable } from '@/core/sources/cached-http-readable'
-import { getPlayableTimeRanges } from '@/core/sources/remote-load-progress'
+import { getPlayableTimeRanges, getRangeByteLength, mergeByteRanges } from '@/core/sources/remote-load-progress'
 import {
   getTransferableBuffers,
   MessageCursor,
@@ -237,13 +237,48 @@ class McapWorker {
     const downloadedByteRanges = readable.getDownloadedRanges()
     const totalBytes = Number(await readable.size())
     const downloadedBytes = readable.getDownloadedBytes()
+    const residentByteRanges = readable.getResidentRanges()
+    const persistedByteRanges = await readable.getPersistedRanges()
+    const persistedBytes = getRangeByteLength(persistedByteRanges)
+    const availableByteRanges = mergeByteRanges([...downloadedByteRanges, ...persistedByteRanges])
     return {
       downloadedByteRanges,
       downloadedBytes,
       totalBytes,
       percent: totalBytes > 0 ? Math.min(100, (downloadedBytes / totalBytes) * 100) : 0,
-      playableTimeRanges: getPlayableTimeRanges(this.chunkCoverage, downloadedByteRanges),
+      residentByteRanges,
+      residentBytes: getRangeByteLength(residentByteRanges),
+      persistedByteRanges,
+      persistedBytes,
+      persistedPercent: totalBytes > 0 ? Math.min(100, (persistedBytes / totalBytes) * 100) : 0,
+      isPersistedComplete: persistedBytes === totalBytes,
+      playableTimeRanges: getPlayableTimeRanges(this.chunkCoverage, availableByteRanges),
+      hasIndexedChunkCoverage: this.chunkCoverage.length > 0,
     }
+  }
+
+  /** Downloads the indexed chunks necessary to keep the requested time window playable. */
+  async prefetchTimeRange(startTimeNs: bigint, endTimeNs: bigint): Promise<RemoteLoadProgress | null> {
+    const readable = this.remoteReadable
+    if (!readable || this.chunkCoverage.length === 0 || endTimeNs < startTimeNs) {
+      return this.getLoadProgress()
+    }
+    const byteRanges = this.chunkCoverage
+      .filter(chunk => chunk.endNs >= startTimeNs && chunk.startNs <= endTimeNs)
+      .map(chunk => chunk.byteRange)
+    await readable.prefetchByteRanges(byteRanges)
+    return this.getLoadProgress()
+  }
+
+  /** Persists every byte block so later seek workers can avoid HTTP requests. */
+  async downloadAllRemoteBlocks(): Promise<RemoteLoadProgress | null> {
+    const readable = this.remoteReadable
+    if (!readable) {
+      return null
+    }
+    const size = Number(await readable.size())
+    await readable.prefetchByteRanges([{ start: 0, end: size }])
+    return this.getLoadProgress()
   }
 
   async getMessages(

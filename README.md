@@ -4,6 +4,8 @@
 在 docs/data/ 目录下
 远程：https://rosview-samples-1328702871.cos.accelerate.myqcloud.com/RealMan_PicknPlace.mcap
 
+https://mcap-proxy.lichtblick.workers.dev/NuScenes-v1.0-mini-scene-sample.mcap
+
 ## 开发文档
 
 - [通用 3D 场景扩展](docs/3d-scene-extension.md)：注册消息 Adapter、Renderer 和坐标帧覆盖。

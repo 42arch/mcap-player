@@ -1,6 +1,8 @@
 import type { IReadable } from '@mcap/core'
 import type { ByteRange } from './remote-load-progress'
+import type { PersistentRemoteBlockStore, RemoteBlockCacheIdentity } from './persistent-remote-block-store'
 import { getRangeByteLength, mergeByteRanges } from './remote-load-progress'
+import { getDefaultRemoteBlockStore } from './persistent-remote-block-store'
 
 const MIB = 1024 * 1024
 const DEFAULT_BLOCK_SIZE = 4 * MIB
@@ -17,6 +19,7 @@ export interface CachedHttpReadableOptions {
   cacheSizeBytes?: number
   retryAttempts?: number
   fetch?: FetchLike
+  persistentBlockStore?: PersistentRemoteBlockStore | null
 }
 
 interface CachedBlock {
@@ -68,6 +71,7 @@ export class CachedHttpReadable implements IReadable {
   private readonly blockSizeBytes: number
   private readonly cacheSizeBytes: number
   private readonly retryAttempts: number
+  private readonly persistentBlockStore: PersistentRemoteBlockStore | null
   private readonly abortController = new AbortController()
   private readonly cache = new Map<number, CachedBlock>()
   private readonly inFlightBlocks = new Map<number, Promise<Uint8Array>>()
@@ -75,6 +79,10 @@ export class CachedHttpReadable implements IReadable {
   private cachedBytes = 0
   private fileSize: number | undefined
   private sizePromise: Promise<number> | null = null
+  private persistentIdentity: RemoteBlockCacheIdentity | null = null
+  private persistentBlocks = new Set<number>()
+  private persistentBlocksPromise: Promise<void> | null = null
+  private validator: string | undefined
 
   constructor(url: string, options: CachedHttpReadableOptions = {}) {
     this.url = url
@@ -82,6 +90,9 @@ export class CachedHttpReadable implements IReadable {
     this.blockSizeBytes = Math.max(1, Math.floor(options.blockSizeBytes ?? DEFAULT_BLOCK_SIZE))
     this.cacheSizeBytes = Math.max(this.blockSizeBytes, Math.floor(options.cacheSizeBytes ?? DEFAULT_CACHE_SIZE))
     this.retryAttempts = Math.max(1, Math.floor(options.retryAttempts ?? DEFAULT_RETRY_ATTEMPTS))
+    this.persistentBlockStore = options.persistentBlockStore === undefined
+      ? getDefaultRemoteBlockStore()
+      : options.persistentBlockStore
     if (options.knownSize !== undefined) {
       if (!Number.isSafeInteger(options.knownSize) || options.knownSize <= 0) {
         throw new Error('Remote MCAP size must be a positive safe integer.')
@@ -168,6 +179,61 @@ export class CachedHttpReadable implements IReadable {
     return getRangeByteLength(this.getDownloadedRanges())
   }
 
+  getResidentRanges(): ByteRange[] {
+    return this.getRangesForBlocks(this.cache.keys())
+  }
+
+  getResidentBytes(): number {
+    return getRangeByteLength(this.getResidentRanges())
+  }
+
+  async getPersistedRanges(): Promise<ByteRange[]> {
+    await this.initializePersistentBlocks()
+    return this.getRangesForBlocks(this.persistentBlocks)
+  }
+
+  async getPersistedBytes(): Promise<number> {
+    return getRangeByteLength(await this.getPersistedRanges())
+  }
+
+  /**
+   * Warm blocks covering the supplied byte ranges without retaining an
+   * unbounded number of pending fetches. Existing cache and in-flight entries
+   * are reused by getBlock().
+   */
+  async prefetchByteRanges(ranges: readonly ByteRange[], maxConcurrent = 2): Promise<void> {
+    if (this.abortController.signal.aborted || ranges.length === 0) {
+      return
+    }
+    const size = await this.getSize()
+    const blockIndexes = new Set<number>()
+    for (const range of ranges) {
+      const start = Math.max(0, Math.floor(range.start))
+      const end = Math.min(size, Math.ceil(range.end))
+      if (end <= start) {
+        continue
+      }
+      const firstBlock = Math.floor(start / this.blockSizeBytes)
+      const lastBlock = Math.floor((end - 1) / this.blockSizeBytes)
+      for (let blockIndex = firstBlock; blockIndex <= lastBlock; blockIndex++) {
+        blockIndexes.add(blockIndex)
+      }
+    }
+
+    const pending = Array.from(blockIndexes)
+    let nextIndex = 0
+    const worker = async () => {
+      while (nextIndex < pending.length) {
+        const blockIndex = pending[nextIndex++]
+        await this.getBlock(blockIndex)
+      }
+    }
+    await Promise.all(Array.from(
+      { length: Math.min(Math.max(1, Math.floor(maxConcurrent)), pending.length) },
+      worker,
+    ))
+  }
+
   private async getSize(): Promise<number> {
     if (this.fileSize !== undefined) {
       return this.fileSize
@@ -195,6 +261,7 @@ export class CachedHttpReadable implements IReadable {
     if (!range?.size || range.start !== 0 || range.end !== 0 || !Number.isSafeInteger(range.size)) {
       throw new Error('The remote server did not expose a valid Content-Range header. Check its CORS configuration.')
     }
+    this.validator = response.headers.get('ETag') ?? response.headers.get('Last-Modified') ?? undefined
     this.fileSize = range.size
     return range.size
   }
@@ -211,7 +278,7 @@ export class CachedHttpReadable implements IReadable {
       return active
     }
 
-    const request = this.fetchBlock(blockIndex)
+    const request = this.loadBlock(blockIndex)
       .then((data) => {
         this.downloadedBlocks.add(blockIndex)
         this.addBlock(blockIndex, data)
@@ -248,6 +315,60 @@ export class CachedHttpReadable implements IReadable {
       throw new Error(`Short remote MCAP response: expected ${expectedLength} bytes, received ${data.byteLength}.`)
     }
     return data
+  }
+
+  private async loadBlock(blockIndex: number): Promise<Uint8Array> {
+    const identity = await this.initializePersistentBlocks()
+    if (!identity || !this.persistentBlockStore) {
+      return this.fetchBlock(blockIndex)
+    }
+
+    const cached = await this.persistentBlockStore.get(identity, blockIndex)
+    if (cached) {
+      this.persistentBlocks.add(blockIndex)
+      return cached
+    }
+
+    return this.persistentBlockStore.runExclusive(identity, blockIndex, async () => {
+      const sharedCached = await this.persistentBlockStore!.get(identity, blockIndex)
+      if (sharedCached) {
+        this.persistentBlocks.add(blockIndex)
+        return sharedCached
+      }
+      const data = await this.fetchBlock(blockIndex)
+      if (await this.persistentBlockStore!.put(identity, blockIndex, data)) {
+        this.persistentBlocks.add(blockIndex)
+      }
+      return data
+    })
+  }
+
+  private async initializePersistentBlocks(): Promise<RemoteBlockCacheIdentity | null> {
+    if (!this.persistentBlockStore) {
+      return null
+    }
+    const size = await this.getSize()
+    if (!this.persistentIdentity) {
+      this.persistentIdentity = { url: this.url, size, validator: this.validator }
+      this.persistentBlocksPromise = this.persistentBlockStore
+        .listBlockIndexes(this.persistentIdentity)
+        .then((blockIndexes) => {
+          this.persistentBlocks = new Set(blockIndexes)
+        })
+        .catch(() => undefined)
+    }
+    await this.persistentBlocksPromise
+    return this.persistentIdentity
+  }
+
+  private getRangesForBlocks(blockIndexes: Iterable<number>): ByteRange[] {
+    if (this.fileSize === undefined) {
+      return []
+    }
+    return mergeByteRanges(Array.from(blockIndexes, (blockIndex) => {
+      const start = blockIndex * this.blockSizeBytes
+      return { start, end: Math.min(this.fileSize!, start + this.blockSizeBytes) }
+    }))
   }
 
   private async fetchWithRetry(init: RequestInit): Promise<Response> {

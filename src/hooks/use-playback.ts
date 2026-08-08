@@ -34,6 +34,8 @@ export function usePlaybackControls() {
     globalPlaybackController.setSpeed(speed)
   }
 
+  const downloadAllRemoteBlocks = () => globalPlaybackController.downloadAllRemoteBlocks()
+
   const stepBackward = (seconds = 5) => {
     if (!fileSummary) {
       return
@@ -58,6 +60,7 @@ export function usePlaybackControls() {
     stepBackward,
     stepForward,
     setPlaybackSpeed,
+    downloadAllRemoteBlocks,
     playbackSpeed,
     elapsedSeconds,
     durationSeconds,

@@ -1,4 +1,5 @@
 import type { McapSource } from '@/core/sources/mcap-source'
+import type { RemoteLoadProgress, RemoteTimeRange } from '@/core/sources/remote-load-progress'
 import type { PlotSeriesData, PlotSeriesRequest } from '@/core/workers/plot-data'
 import type { TimelineTopicData } from '@/core/workers/timeline-data'
 import type { BackfillClass } from '@/core/workers/topic-classifier'
@@ -7,6 +8,7 @@ import { resetDatasetResources } from '@/core/dataset-resource-registry'
 import { PlaybackBatchAccumulator } from '@/core/playback-batch-accumulator'
 import { setPlaybackElapsedNs } from '@/core/playback-time-store'
 import { createRemoteMcapSource } from '@/core/sources/mcap-source'
+import { getPlayableRangeEnd } from '@/core/sources/remote-load-progress'
 import { getBackfillClass } from '@/core/workers/topic-classifier'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -27,6 +29,9 @@ const SEEK_BACKFILL_PHASES: readonly BackfillClass[] = ['fast', 'spatial', 'medi
 const MIB = 1024 * 1024
 const PLAYBACK_REMOTE_CACHE_BYTES = 96 * MIB
 const SEEK_REMOTE_CACHE_BYTES = 64 * MIB
+const REMOTE_BUFFER_LOW_WATER_PERCENT = 1n
+const REMOTE_BUFFER_RESUME_PERCENT = 3n
+const REMOTE_BUFFER_TARGET_PERCENT = 10n
 
 export class PlaybackController {
   private worker: any = null
@@ -52,6 +57,12 @@ export class PlaybackController {
   private remoteProgressTimer: ReturnType<typeof setInterval> | null = null
   private remoteProgressSession = 0
   private isRemoteProgressPolling = false
+  private isRemoteSource = false
+  private isRemoteBuffering = false
+  private remoteRangeBufferingAvailable: boolean | null = null
+  private remotePlayableTimeRanges: RemoteTimeRange[] = []
+  private isRemotePrefetching = false
+  private isRemoteFullDownloadRunning = false
 
   constructor() {
     globalMessagePipeline.onSubscriptionsChanged((panelId) => {
@@ -140,6 +151,7 @@ export class PlaybackController {
   async loadSource(source: McapSource) {
     const loadGeneration = ++this.loadGeneration
     this.stopRemoteProgressPolling()
+    this.resetRemoteBufferState()
     this.pause()
     this.pendingSeekBackfill = null
     this.seekGeneration++
@@ -182,6 +194,7 @@ export class PlaybackController {
     const store = usePlayerStore.getState()
     store.setFileSummary(summary)
     if (source.kind === 'remote') {
+      this.isRemoteSource = true
       this.startRemoteProgressPolling(loadGeneration)
     }
   }
@@ -189,6 +202,7 @@ export class PlaybackController {
   closeFile() {
     this.loadGeneration++
     this.stopRemoteProgressPolling()
+    this.resetRemoteBufferState()
     this.pause()
     this.pendingSeekBackfill = null
     this.seekGeneration++
@@ -239,6 +253,8 @@ export class PlaybackController {
 
   pause() {
     this.resumeAfterSeek = false
+    this.isRemoteBuffering = false
+    usePlayerStore.getState().setIsRemoteBuffering(false)
     if (this.clock?.getIsPlaying()) {
       this.clock.pause()
     }
@@ -304,6 +320,10 @@ export class PlaybackController {
 
       setPlaybackElapsedNs(current - this.fileSummary.startNs)
 
+      if (this.isRemoteSource) {
+        this.maintainRemoteBuffer(current)
+      }
+
       const seekBackfillPending = this.isSeekBackfillRunning || this.pendingSeekBackfill !== null
       const plan = globalMessagePipeline.getQueryPlan()
       const worker = this.getWorker()
@@ -339,6 +359,7 @@ export class PlaybackController {
             })
             .finally(() => {
               this.isQuerying = false
+              this.maybeResumeRemotePlayback()
               this.resumePlaybackAfterSeekIfReady()
             })
         }
@@ -497,7 +518,7 @@ export class PlaybackController {
       try {
         const progress = await this.getWorker().getLoadProgress()
         if (session === this.remoteProgressSession && loadGeneration === this.loadGeneration) {
-          usePlayerStore.getState().setRemoteLoadProgress(progress)
+          this.applyRemoteLoadProgress(progress)
         }
       }
       catch (error) {
@@ -525,7 +546,159 @@ export class PlaybackController {
       clearInterval(this.remoteProgressTimer)
       this.remoteProgressTimer = null
     }
+    this.remotePlayableTimeRanges = []
+    this.remoteRangeBufferingAvailable = null
     usePlayerStore.getState().setRemoteLoadProgress(null)
+  }
+
+  /**
+   * Size the remote buffer from the recording duration so short recordings do
+   * not incur a fixed, oversized initial download.
+   */
+  private getRemoteBufferDurationNs(percent: bigint): bigint {
+    if (!this.fileSummary) {
+      return 0n
+    }
+    const durationNs = BigInt(this.fileSummary.endNs) - BigInt(this.fileSummary.startNs)
+    return durationNs > 0n ? (durationNs * percent) / 100n : 0n
+  }
+
+  private getRemotePlayableEnd(timeNs: bigint): bigint | null {
+    return getPlayableRangeEnd(this.remotePlayableTimeRanges, timeNs)
+  }
+
+  private hasRemoteBuffer(timeNs: bigint, minimumDurationNs: bigint): boolean {
+    const playableEnd = this.getRemotePlayableEnd(timeNs)
+    const requiredEnd = this.fileSummary
+      ? (timeNs + minimumDurationNs < this.fileSummary.endNs ? timeNs + minimumDurationNs : this.fileSummary.endNs)
+      : timeNs + minimumDurationNs
+    return playableEnd !== null && playableEnd >= requiredEnd
+  }
+
+  private maintainRemoteBuffer(currentTimeNs: bigint) {
+    if (this.remoteRangeBufferingAvailable === false) {
+      return
+    }
+    const lowWaterNs = this.getRemoteBufferDurationNs(REMOTE_BUFFER_LOW_WATER_PERCENT)
+    const targetNs = this.getRemoteBufferDurationNs(REMOTE_BUFFER_TARGET_PERCENT)
+    if (!this.hasRemoteBuffer(currentTimeNs, lowWaterNs)) {
+      this.enterRemoteBuffering(currentTimeNs)
+    }
+    if (!this.hasRemoteBuffer(currentTimeNs, targetNs)) {
+      this.prefetchRemoteBuffer(currentTimeNs)
+    }
+  }
+
+  private enterRemoteBuffering(currentTimeNs: bigint) {
+    if (!this.isRemoteBuffering) {
+      this.isRemoteBuffering = true
+      usePlayerStore.getState().setIsRemoteBuffering(true)
+      this.clock?.pause()
+      this.lastTickTimeNs = currentTimeNs
+      setPlaybackElapsedNs(currentTimeNs - (this.fileSummary?.startNs ?? currentTimeNs))
+    }
+    this.prefetchRemoteBuffer(currentTimeNs)
+  }
+
+  private prefetchRemoteBuffer(startTimeNs: bigint) {
+    if (this.isRemotePrefetching || !this.isRemoteSource || !this.fileSummary) {
+      return
+    }
+    const targetTimeNs = startTimeNs + this.getRemoteBufferDurationNs(REMOTE_BUFFER_TARGET_PERCENT)
+    const endTimeNs = targetTimeNs < this.fileSummary.endNs ? targetTimeNs : this.fileSummary.endNs
+    if (endTimeNs <= startTimeNs) {
+      return
+    }
+    const generation = this.loadGeneration
+    this.isRemotePrefetching = true
+    this.getWorker().prefetchTimeRange(startTimeNs, endTimeNs)
+      .then((progress: RemoteLoadProgress | null) => {
+        if (generation === this.loadGeneration) {
+          this.applyRemoteLoadProgress(progress)
+        }
+      })
+      .catch((error: unknown) => {
+        if (generation === this.loadGeneration) {
+          console.warn('Failed to prefetch remote MCAP data:', error)
+        }
+      })
+      .finally(() => {
+        if (generation === this.loadGeneration) {
+          this.isRemotePrefetching = false
+          this.maybeResumeRemotePlayback()
+        }
+      })
+  }
+
+  private applyRemoteLoadProgress(progress: RemoteLoadProgress | null) {
+    if (progress) {
+      this.remotePlayableTimeRanges = progress.playableTimeRanges
+      this.remoteRangeBufferingAvailable = progress.hasIndexedChunkCoverage
+    }
+    usePlayerStore.getState().setRemoteLoadProgress(progress)
+    this.maybeResumeRemotePlayback()
+  }
+
+  private maybeResumeRemotePlayback() {
+    if (!this.isRemoteBuffering || !this.clock || !this.fileSummary || this.isQuerying) {
+      return
+    }
+    if (this.remoteRangeBufferingAvailable === false) {
+      this.resumeRemoteClock()
+      return
+    }
+    const currentTimeNs = this.clock.get()
+    if (!this.hasRemoteBuffer(currentTimeNs, this.getRemoteBufferDurationNs(REMOTE_BUFFER_RESUME_PERCENT))) {
+      return
+    }
+    this.resumeRemoteClock()
+  }
+
+  private resumeRemoteClock() {
+    if (!this.clock || !this.isRemoteBuffering) {
+      return
+    }
+    this.clock.seek(this.lastTickTimeNs)
+    this.clock.play()
+    this.isRemoteBuffering = false
+    usePlayerStore.getState().setIsRemoteBuffering(false)
+  }
+
+  private resetRemoteBufferState() {
+    this.isRemoteSource = false
+    this.isRemoteBuffering = false
+    this.remoteRangeBufferingAvailable = null
+    this.remotePlayableTimeRanges = []
+    this.isRemotePrefetching = false
+    this.isRemoteFullDownloadRunning = false
+    usePlayerStore.getState().setIsRemoteBuffering(false)
+    usePlayerStore.getState().setIsRemoteFullDownloadRunning(false)
+  }
+
+  async downloadAllRemoteBlocks(): Promise<void> {
+    if (!this.isRemoteSource || this.isRemoteFullDownloadRunning) {
+      return
+    }
+    const generation = this.loadGeneration
+    this.isRemoteFullDownloadRunning = true
+    usePlayerStore.getState().setIsRemoteFullDownloadRunning(true)
+    try {
+      const progress = await this.getWorker().downloadAllRemoteBlocks()
+      if (generation === this.loadGeneration) {
+        this.applyRemoteLoadProgress(progress)
+      }
+    }
+    catch (error) {
+      if (generation === this.loadGeneration) {
+        console.warn('Failed to persist all remote MCAP blocks:', error)
+      }
+    }
+    finally {
+      if (generation === this.loadGeneration) {
+        this.isRemoteFullDownloadRunning = false
+        usePlayerStore.getState().setIsRemoteFullDownloadRunning(false)
+      }
+    }
   }
 
   async getFirstMessagePayload(topic: string) {

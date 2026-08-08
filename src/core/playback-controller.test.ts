@@ -122,4 +122,47 @@ describe('playback controller seek gating', () => {
     media.resolve([])
     controller.pause()
   })
+
+  it('freezes remote playback until its continuous time buffer reaches the resume waterline', async () => {
+    const progress = deferred<any>()
+    const clock = new PlaybackClock(0n, 20_000_000_000n)
+    const controller = new PlaybackController()
+    const worker = {
+      prefetchTimeRange: vi.fn(() => progress.promise),
+    }
+    Object.assign(controller as any, {
+      clock,
+      fileSummary: { startNs: 0n, endNs: 20_000_000_000n, channels: [] },
+      worker,
+      isRemoteSource: true,
+      remoteRangeBufferingAvailable: true,
+      remotePlayableTimeRanges: [],
+    })
+    clock.play()
+
+    ;(controller as any).maintainRemoteBuffer(2_000_000_000n)
+
+    expect(clock.getIsPlaying()).toBe(false)
+    expect(usePlayerStore.getState().isRemoteBuffering).toBe(true)
+    expect(worker.prefetchTimeRange).toHaveBeenCalledWith(2_000_000_000n, 4_000_000_000n)
+
+    progress.resolve({
+      downloadedBytes: 1,
+      totalBytes: 1,
+      percent: 100,
+      downloadedByteRanges: [{ start: 0, end: 1 }],
+      residentBytes: 1,
+      residentByteRanges: [{ start: 0, end: 1 }],
+      persistedBytes: 1,
+      persistedByteRanges: [{ start: 0, end: 1 }],
+      persistedPercent: 100,
+      isPersistedComplete: true,
+      playableTimeRanges: [{ startNs: 0n, endNs: 15_000_000_000n }],
+      hasIndexedChunkCoverage: true,
+    })
+
+    await vi.waitFor(() => expect(clock.getIsPlaying()).toBe(true))
+    expect(usePlayerStore.getState().isRemoteBuffering).toBe(false)
+    controller.pause()
+  })
 })

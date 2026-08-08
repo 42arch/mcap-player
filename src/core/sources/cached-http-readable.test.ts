@@ -1,5 +1,6 @@
 import { McapIndexedReader, McapWriter } from '@mcap/core'
 import { describe, expect, it, vi } from 'vitest'
+import type { PersistentRemoteBlockStore, RemoteBlockCacheIdentity } from './persistent-remote-block-store'
 import { CachedHttpReadable } from './cached-http-readable'
 
 class MemoryWritable {
@@ -34,6 +35,23 @@ function partialResponse(data: number[], start: number, end: number, size: numbe
       'Content-Range': `bytes ${start}-${end}/${size}`,
     },
   })
+}
+
+function createMemoryBlockStore(): PersistentRemoteBlockStore {
+  const blocks = new Map<string, Uint8Array>()
+  const getKey = (identity: RemoteBlockCacheIdentity, blockIndex: number) =>
+    `${identity.url}:${identity.size}:${identity.validator ?? ''}:${blockIndex}`
+  return {
+    get: async (identity, blockIndex) => blocks.get(getKey(identity, blockIndex))?.slice() ?? null,
+    put: async (identity, blockIndex, data) => {
+      blocks.set(getKey(identity, blockIndex), data.slice())
+      return true
+    },
+    listBlockIndexes: async (identity) => Array.from(blocks.keys())
+      .filter(key => key.startsWith(`${identity.url}:${identity.size}:${identity.validator ?? ''}:`))
+      .map(key => Number(key.slice(key.lastIndexOf(':') + 1))),
+    runExclusive: async (_identity, _blockIndex, task) => task(),
+  }
 }
 
 describe('cachedHttpReadable', () => {
@@ -111,6 +129,76 @@ describe('cachedHttpReadable', () => {
     expect(fetch).toHaveBeenCalledTimes(4)
     expect(readable.getDownloadedRanges()).toEqual([{ start: 0, end: 12 }])
     expect(readable.getDownloadedBytes()).toBe(12)
+  })
+
+  it('prefetches requested ranges with bounded concurrent block reads', async () => {
+    const bytes = Uint8Array.from({ length: 16 }, (_, index) => index)
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const match = /bytes=(\d+)-(\d+)/.exec((init?.headers as Record<string, string>).Range)!
+      const start = Number(match[1])
+      const end = Number(match[2])
+      return partialResponse(Array.from(bytes.slice(start, end + 1)), start, end, bytes.length)
+    })
+    const readable = new CachedHttpReadable('https://example.com/run.mcap', {
+      fetch,
+      knownSize: bytes.length,
+      blockSizeBytes: 4,
+    })
+
+    await readable.prefetchByteRanges([{ start: 1, end: 11 }])
+
+    expect(fetch).toHaveBeenCalledTimes(3)
+    expect(readable.getDownloadedRanges()).toEqual([{ start: 0, end: 12 }])
+  })
+
+  it('reuses persisted blocks across independent remote readers', async () => {
+    const bytes = Uint8Array.from([0, 1, 2, 3])
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const match = /bytes=(\d+)-(\d+)/.exec((init?.headers as Record<string, string>).Range)!
+      const start = Number(match[1])
+      const end = Number(match[2])
+      return partialResponse(Array.from(bytes.slice(start, end + 1)), start, end, bytes.length)
+    })
+    const persistentBlockStore = createMemoryBlockStore()
+    const first = new CachedHttpReadable('https://example.com/run.mcap', {
+      fetch,
+      knownSize: bytes.length,
+      blockSizeBytes: 4,
+      persistentBlockStore,
+    })
+    const second = new CachedHttpReadable('https://example.com/run.mcap', {
+      fetch,
+      knownSize: bytes.length,
+      blockSizeBytes: 4,
+      persistentBlockStore,
+    })
+
+    await expect(first.read(0n, 4n)).resolves.toEqual(bytes)
+    await expect(second.read(0n, 4n)).resolves.toEqual(bytes)
+
+    expect(fetch).toHaveBeenCalledOnce()
+    await expect(second.getPersistedBytes()).resolves.toBe(4)
+  })
+
+  it('can persist every block in a remote file for offline reuse', async () => {
+    const bytes = Uint8Array.from({ length: 16 }, (_, index) => index)
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const match = /bytes=(\d+)-(\d+)/.exec((init?.headers as Record<string, string>).Range)!
+      const start = Number(match[1])
+      const end = Number(match[2])
+      return partialResponse(Array.from(bytes.slice(start, end + 1)), start, end, bytes.length)
+    })
+    const readable = new CachedHttpReadable('https://example.com/run.mcap', {
+      fetch,
+      knownSize: bytes.length,
+      blockSizeBytes: 4,
+      persistentBlockStore: createMemoryBlockStore(),
+    })
+
+    await readable.prefetchByteRanges([{ start: 0, end: bytes.length }])
+
+    await expect(readable.getPersistedBytes()).resolves.toBe(bytes.length)
+    expect(fetch).toHaveBeenCalledTimes(4)
   })
 
   it('provides random access to a real indexed MCAP reader', async () => {

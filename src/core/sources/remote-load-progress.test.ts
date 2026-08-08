@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   getPlayableTimeRanges,
+  getPlayableRangeEnd,
   getRangeByteLength,
   mergeByteRanges,
 } from './remote-load-progress'
@@ -35,5 +36,15 @@ describe('remote load progress', () => {
       { startNs: 0n, endNs: 4_000_000_000n },
       { startNs: 10_000_000_000n, endNs: 12_000_000_000n },
     ])
+  })
+
+  it('finds the continuous playable range containing a playback time', () => {
+    const ranges = [
+      { startNs: 0n, endNs: 4_000_000_000n },
+      { startNs: 8_000_000_000n, endNs: 10_000_000_000n },
+    ]
+
+    expect(getPlayableRangeEnd(ranges, 2_000_000_000n)).toBe(4_000_000_000n)
+    expect(getPlayableRangeEnd(ranges, 6_000_000_000n)).toBeNull()
   })
 })

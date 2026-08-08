@@ -1,4 +1,4 @@
-import { FastForward, Pause, Play, Rewind } from 'lucide-react'
+import { Download, FastForward, Pause, Play, Rewind } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { FormattedMessage, useIntl } from 'react-intl'
@@ -66,6 +66,7 @@ export default function Playback() {
     stepBackward,
     stepForward,
     setPlaybackSpeed,
+    downloadAllRemoteBlocks,
     playbackSpeed,
     elapsedSeconds,
     durationSeconds,
@@ -73,6 +74,8 @@ export default function Playback() {
     fileSummary,
   } = usePlaybackControls()
   const remoteLoadProgress = usePlayerStore(state => state.remoteLoadProgress)
+  const isRemoteBuffering = usePlayerStore(state => state.isRemoteBuffering)
+  const isRemoteFullDownloadRunning = usePlayerStore(state => state.isRemoteFullDownloadRunning)
 
   const displayedSeconds = scrubSeconds ?? elapsedSeconds
   const elapsedNs = BigInt(Math.round(displayedSeconds * 1_000_000_000))
@@ -158,7 +161,7 @@ export default function Playback() {
       {/* Progress Slider (Top Row) */}
       <div
         ref={sliderContainerRef}
-        className="relative w-full flex items-center py-1 cursor-pointer"
+        className="relative flex min-h-5 w-full shrink-0 items-center py-1 cursor-pointer"
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
       >
@@ -269,6 +272,42 @@ export default function Playback() {
           >
             <FastForward className="w-3.5 h-3.5" />
           </Button>
+
+          {remoteLoadProgress ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={isRemoteBuffering ? 'text-amber-500' : remoteLoadProgress.isPersistedComplete ? 'text-emerald-500' : undefined}
+              onClick={() => void downloadAllRemoteBlocks()}
+              disabled={isRemoteFullDownloadRunning || remoteLoadProgress.isPersistedComplete}
+              title={`${intl.formatMessage({
+                id: remoteLoadProgress.isPersistedComplete
+                  ? 'playback.remoteAvailableOffline'
+                  : isRemoteFullDownloadRunning
+                    ? 'playback.remoteCachingAll'
+                    : 'playback.remoteCacheAll',
+                defaultMessage: remoteLoadProgress.isPersistedComplete
+                  ? 'Available offline'
+                  : isRemoteFullDownloadRunning
+                    ? 'Caching all data…'
+                    : 'Cache all data',
+              })}\n${intl.formatMessage(
+                { id: 'playback.remoteLoadProgress', defaultMessage: 'Fetched {fetched} / {total} ({fetchedPercent}%) · Stored {stored} ({storedPercent}%)' },
+                {
+                  fetched: formatBytes(remoteLoadProgress.downloadedBytes),
+                  total: formatBytes(remoteLoadProgress.totalBytes),
+                  fetchedPercent: Math.round(remoteLoadProgress.percent),
+                  stored: formatBytes(remoteLoadProgress.persistedBytes),
+                  storedPercent: Math.round(remoteLoadProgress.persistedPercent),
+                },
+              )}\n${intl.formatMessage(
+                { id: 'playback.remoteMemoryCache', defaultMessage: 'Memory cache {resident}' },
+                { resident: formatBytes(remoteLoadProgress.residentBytes) },
+              )}`}
+            >
+              <Download className="w-3.5 h-3.5" />
+            </Button>
+          ) : null}
         </div>
 
         {/* Right: Time Text */}
@@ -283,29 +322,6 @@ export default function Playback() {
             {' / '}
             {formatDuration(durationNs, 3)}
           </div>
-          {remoteLoadProgress && (
-            <div
-              className="text-primary/80"
-              title={intl.formatMessage(
-                { id: 'playback.remoteLoadProgress', defaultMessage: 'Cached {loaded} / {total} ({percent}%)' },
-                {
-                  loaded: formatBytes(remoteLoadProgress.downloadedBytes),
-                  total: formatBytes(remoteLoadProgress.totalBytes),
-                  percent: Math.round(remoteLoadProgress.percent),
-                },
-              )}
-            >
-              <FormattedMessage
-                id="playback.remoteLoadProgress"
-                defaultMessage="Cached {loaded} / {total} ({percent}%)"
-                values={{
-                  loaded: formatBytes(remoteLoadProgress.downloadedBytes),
-                  total: formatBytes(remoteLoadProgress.totalBytes),
-                  percent: Math.round(remoteLoadProgress.percent),
-                }}
-              />
-            </div>
-          )}
         </div>
       </div>
     </div>
