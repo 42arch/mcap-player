@@ -1,10 +1,30 @@
 import { create } from 'zustand'
 
+export interface McapHeader {
+  profile?: string
+  library?: string
+}
+
+export interface McapMetadataItem {
+  name: string
+  metadata: Record<string, string>
+}
+
+export interface McapAttachmentItem {
+  name: string
+  mediaType: string
+  size: number
+  logTime?: bigint
+  createTime?: bigint
+}
+
 export interface McapChannel {
   id: number
   topic: string
   schemaId: number
   schemaName?: string
+  messageEncoding?: string
+  metadata?: Record<string, string>
   messageCount: number
 }
 
@@ -33,11 +53,18 @@ export interface McapFileSummary {
   messageCount: number
   channels: McapChannel[]
   schemas: McapSchema[]
-  messages: McapMessage[]
+  messages?: McapMessage[]
   durationNs: bigint
   startNs: bigint
   endNs: bigint
   frameIds?: string[]
+  header?: McapHeader
+  compressions?: string[]
+  chunkCount?: number
+  attachmentCount?: number
+  metadataCount?: number
+  metadataItems?: McapMetadataItem[]
+  attachments?: McapAttachmentItem[]
 }
 
 export interface PlotSeries {

@@ -12,7 +12,7 @@ import Playback from './playback'
 import SideBar from './side-bar'
 
 export default function AppShell() {
-  const { setTheme, resolvedTheme } = useTheme()
+  const { resolvedTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   // Avoid hydration mismatch by waiting for mount
@@ -25,12 +25,11 @@ export default function AppShell() {
   }
 
   const darkMode = resolvedTheme === 'dark'
-  const setDarkMode = (dark: boolean) => setTheme(dark ? 'dark' : 'light')
 
   return (
     <div className="workspace-font-override h-screen flex flex-col bg-background text-foreground select-none text-[11px] font-sans tracking-tight antialiased transition-colors duration-300">
       {/* Workspace Menubar */}
-      <MenuBar darkMode={darkMode} setDarkMode={setDarkMode} />
+      <MenuBar />
 
       {/* Editor Body */}
       <div className="flex-1 flex min-h-0">

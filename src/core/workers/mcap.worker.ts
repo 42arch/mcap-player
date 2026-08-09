@@ -90,6 +90,24 @@ class McapWorker {
       })
     }
 
+    // Extract header & compressions
+    const header = this.reader.header
+      ? {
+          profile: this.reader.header.profile,
+          library: this.reader.header.library,
+        }
+      : undefined
+
+    const compressionsSet = new Set<string>()
+    if (this.reader.chunkIndexes.length > 0) {
+      for (const idx of this.reader.chunkIndexes) {
+        if (idx.compression) {
+          compressionsSet.add(idx.compression)
+        }
+      }
+    }
+    const compressions = Array.from(compressionsSet)
+
     // Channels
     const channelsList = []
     const stats = this.reader.statistics
@@ -102,13 +120,55 @@ class McapWorker {
 
     for (const [id, ch] of this.reader.channelsById.entries()) {
       const schema = this.reader.schemasById.get(ch.schemaId)
+      const metadataObj: Record<string, string> = {}
+      if (ch.metadata) {
+        for (const [k, v] of ch.metadata.entries()) {
+          metadataObj[k] = v
+        }
+      }
       channelsList.push({
         id,
         topic: ch.topic,
         schemaId: ch.schemaId,
         schemaName: schema ? schema.name : undefined,
+        messageEncoding: ch.messageEncoding,
+        metadata: Object.keys(metadataObj).length > 0 ? metadataObj : undefined,
         messageCount: channelCounts.get(id) || 0,
       })
+    }
+
+    // Extract Metadata records
+    const metadataItems: { name: string, metadata: Record<string, string> }[] = []
+    try {
+      for await (const meta of this.reader.readMetadata()) {
+        const metaObj: Record<string, string> = {}
+        if (meta.metadata) {
+          for (const [k, v] of meta.metadata.entries()) {
+            metaObj[k] = v
+          }
+        }
+        metadataItems.push({
+          name: meta.name,
+          metadata: metaObj,
+        })
+      }
+    }
+    catch (err) {
+      console.warn('Failed to read MCAP metadata records:', err)
+    }
+
+    // Extract Attachments
+    const attachments: { name: string, mediaType: string, size: number, logTime?: bigint, createTime?: bigint }[] = []
+    if (this.reader.attachmentIndexes.length > 0) {
+      for (const attIdx of this.reader.attachmentIndexes) {
+        attachments.push({
+          name: attIdx.name,
+          mediaType: attIdx.mediaType,
+          size: Number(attIdx.dataSize),
+          logTime: attIdx.logTime,
+          createTime: attIdx.createTime,
+        })
+      }
     }
 
     // Calculate start and end times from chunk indexes
@@ -154,6 +214,13 @@ class McapWorker {
       startNs: startNs > -1n ? startNs : 0n,
       endNs: endNs > -1n ? endNs : 0n,
       frameIds,
+      header,
+      compressions,
+      chunkCount: stats?.chunkCount ?? this.reader.chunkIndexes.length,
+      attachmentCount: stats?.attachmentCount ?? attachments.length,
+      metadataCount: stats?.metadataCount ?? metadataItems.length,
+      metadataItems,
+      attachments,
     }
   }
 

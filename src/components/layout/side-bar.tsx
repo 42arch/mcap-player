@@ -1,4 +1,4 @@
-import { FileText, Info, Radio, Search, SlidersHorizontal } from 'lucide-react'
+import { Code2, Info, Radio, Search, SlidersHorizontal, X } from 'lucide-react'
 import { useState } from 'react'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { Input } from '@/components/ui/input'
@@ -82,7 +82,7 @@ export default function SideBar() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
               type="text"
-              placeholder={intl.formatMessage({ id: 'sidebar.searchPlaceholder', defaultMessage: 'Filter topics...' })}
+              placeholder={intl.formatMessage({ id: 'sidebar.searchPlaceholder', defaultMessage: 'Filter topics or schemas...' })}
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               className="pl-8 text-xs"
@@ -113,8 +113,8 @@ export default function SideBar() {
                         }`}
                       >
                         <div className="flex-1 min-h-0 flex flex-col">
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="font-mono text-[11px] text-foreground font-semibold break-all select-text leading-tight">
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <span className="font-mono text-[10px] text-foreground font-semibold truncate select-text min-w-0" title={ch.topic}>
                               {ch.topic}
                             </span>
                             <span className="shrink-0 inline-flex items-center justify-center bg-secondary/80 text-secondary-foreground text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold">
@@ -122,13 +122,9 @@ export default function SideBar() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 mt-1 text-[10px] text-muted-foreground group-hover:text-accent-foreground/75">
-                            <FileText className="w-3 h-3 opacity-60" />
+                            <Code2 className="w-3 h-3 opacity-60" />
                             <span className="truncate select-text" title={ch.schemaName}>
                               {ch.schemaName || 'No Schema'}
-                            </span>
-                            <span className="opacity-40 font-mono shrink-0">
-                              • ID
-                              {ch.id}
                             </span>
                           </div>
                         </div>
@@ -142,9 +138,19 @@ export default function SideBar() {
         {/* Selected Channel Details Pane */}
         {selectedChannel && (
           <div className="border-t border-border bg-card/60 p-3 space-y-2 shrink-0 max-h-55 overflow-auto">
-            <div className="flex items-center gap-1.5 font-bold text-[9px] text-muted-foreground uppercase tracking-wide">
-              <Info className="w-3 h-3 text-primary" />
-              Channel Details
+            <div className="flex items-center justify-between gap-1.5 font-bold text-[9px] text-muted-foreground uppercase tracking-wide">
+              <div className="flex items-center gap-1.5">
+                <Info className="w-3 h-3 text-primary" />
+                Channel Details
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedTopic(null)}
+                className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                title="Deselect"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
             <div className="space-y-1.5 font-mono text-[10px]">
               <div className="flex items-start gap-1">

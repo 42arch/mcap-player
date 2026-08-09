@@ -1,5 +1,5 @@
 import type { SupportedLocale } from '@/stores/use-locale-store'
-import { FileCode, Moon, Sun } from 'lucide-react'
+import { FileCode } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useRef } from 'react'
 import { FormattedMessage } from 'react-intl'
@@ -18,23 +18,13 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from '@/components/ui/menubar'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { buildExportData, downloadJsonFile, parseAndValidateConfig } from '@/panels/core/config-io'
 import { useLocaleStore } from '@/stores/use-locale-store'
 import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
 
-interface MenuBarProps {
-  darkMode: boolean
-  setDarkMode: (dark: boolean) => void
-}
-
-export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
+export default function MenuBar() {
   const { theme, setTheme } = useTheme()
   const locale = useLocaleStore(state => state.locale)
   const setLocale = useLocaleStore(state => state.setLocale)
@@ -253,21 +243,20 @@ export default function MenuBar({ darkMode, setDarkMode }: MenuBarProps) {
         </div>
       )}
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => setDarkMode(!darkMode)}
-            aria-label="Toggle theme"
-          >
-            {darkMode
-              ? <Sun data-icon="inline-start" className="w-3.5 h-3.5" />
-              : <Moon data-icon="inline-start" className="w-3.5 h-3.5" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Toggle theme</TooltipContent>
-      </Tooltip>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        asChild
+      >
+        <a
+          href="https://github.com/42arch/mcap-player"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="GitHub Repository"
+        >
+          <img src="/github.svg" className="w-3.5 h-3.5 dark:invert" alt="GitHub" />
+        </a>
+      </Button>
     </div>
   )
 }
