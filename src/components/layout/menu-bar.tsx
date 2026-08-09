@@ -1,10 +1,12 @@
 import type { SupportedLocale } from '@/stores/use-locale-store'
-import { FileCode } from 'lucide-react'
+import { FileCode, Globe2 } from 'lucide-react'
 import { useTheme } from 'next-themes'
-import { useRef } from 'react'
-import { FormattedMessage } from 'react-intl'
+import { useRef, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { Field, FieldError } from '@/components/ui/field'
+import { Input } from '@/components/ui/input'
 import {
   Menubar,
   MenubarContent,
@@ -19,17 +21,22 @@ import {
   MenubarTrigger,
 } from '@/components/ui/menubar'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { createRemoteMcapSource } from '@/core/sources/mcap-source'
 import { buildExportData, downloadJsonFile, parseAndValidateConfig } from '@/panels/core/config-io'
 import { useLocaleStore } from '@/stores/use-locale-store'
 import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
+import { formatRemoteUrlError } from './remote-url-error'
 
 export default function MenuBar() {
+  const { formatMessage } = useIntl()
   const { theme, setTheme } = useTheme()
   const locale = useLocaleStore(state => state.locale)
   const setLocale = useLocaleStore(state => state.setLocale)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const layoutInputRef = useRef<HTMLInputElement>(null)
+  const [remoteUrl, setRemoteUrl] = useState('')
+  const [remoteError, setRemoteError] = useState<string | null>(null)
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const setIsLoading = usePlayerStore(state => state.setIsLoading)
   const setError = usePlayerStore(state => state.setError)
@@ -53,6 +60,7 @@ export default function MenuBar() {
     }
     catch (err: any) {
       console.error(err)
+      globalPlaybackController.closeFile()
       setError(err.message || 'Failed to parse MCAP file')
     }
     finally {
@@ -64,6 +72,32 @@ export default function MenuBar() {
 
   const handleOpenClick = () => {
     fileInputRef.current?.click()
+  }
+
+  const handleOpenRemoteSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setRemoteError(null)
+
+    let normalizedUrl: string
+    try {
+      normalizedUrl = createRemoteMcapSource(remoteUrl).url
+    }
+    catch (error) {
+      setRemoteError(formatRemoteUrlError(error, formatMessage))
+      return
+    }
+
+    resetPanels()
+    setIsLoading(true, 'Reading remote MCAP indexes...')
+    try {
+      await globalPlaybackController.loadRemoteUrl(normalizedUrl)
+      setRemoteUrl('')
+    }
+    catch (err: any) {
+      console.error('Failed to load remote MCAP:', err)
+      globalPlaybackController.closeFile()
+      setError(err.message || 'Failed to load remote MCAP file')
+    }
   }
 
   const handleExportLayout = () => {
@@ -139,6 +173,39 @@ export default function MenuBar() {
             >
               <FormattedMessage id="menu.openFile" defaultMessage="Open File" />
             </MenubarItem>
+            <MenubarSub>
+              <MenubarSubTrigger className="focus:bg-accent focus:text-accent-foreground py-1 px-2 rounded-xs cursor-pointer">
+                <FormattedMessage id="menu.openRemote" defaultMessage="Open Remote URL" />
+              </MenubarSubTrigger>
+              <MenubarSubContent className="w-80 border-border bg-popover p-3 text-popover-foreground">
+                <form className="flex flex-col gap-3" onSubmit={event => void handleOpenRemoteSubmit(event)}>
+                  <Field data-invalid={remoteError !== null}>
+                    <Input
+                      type="url"
+                      value={remoteUrl}
+                      onChange={(event) => {
+                        setRemoteUrl(event.target.value)
+                        if (remoteError) {
+                          setRemoteError(null)
+                        }
+                      }}
+                      placeholder={formatMessage({
+                        id: 'landing.remotePlaceholder',
+                        defaultMessage: 'https://example.com/recording.mcap',
+                      })}
+                      aria-label={formatMessage({ id: 'landing.remoteUrlLabel', defaultMessage: 'Remote MCAP URL' })}
+                      aria-invalid={remoteError !== null}
+                      autoComplete="url"
+                    />
+                    <FieldError>{remoteError}</FieldError>
+                  </Field>
+                  <Button type="submit" disabled={!remoteUrl.trim()}>
+                    <Globe2 data-icon="inline-start" />
+                    <FormattedMessage id="landing.openRemote" defaultMessage="Open Remote File" />
+                  </Button>
+                </form>
+              </MenubarSubContent>
+            </MenubarSub>
             <MenubarItem
               disabled={!fileSummary}
               onClick={handleCloseFile}

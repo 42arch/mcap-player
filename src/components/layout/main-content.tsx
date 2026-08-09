@@ -31,7 +31,21 @@ export default function MainContent({ darkMode }: MainContentProps) {
     }
     catch (err: any) {
       console.error(err)
+      globalPlaybackController.closeFile()
       setError(err.message || 'Failed to parse MCAP file')
+    }
+  }
+
+  const handleRemoteUrlSubmit = async (url: string) => {
+    resetPanels()
+    setIsLoading(true, 'Reading remote MCAP indexes...')
+    try {
+      await globalPlaybackController.loadRemoteUrl(url)
+    }
+    catch (err: any) {
+      console.error('Failed to load remote MCAP:', err)
+      globalPlaybackController.closeFile()
+      setError(err.message || 'Failed to load remote MCAP file')
     }
   }
 
@@ -69,7 +83,13 @@ export default function MainContent({ darkMode }: MainContentProps) {
 
   // 3. Landing State (No File Loaded)
   if (!fileSummary) {
-    return <LandingView darkMode={darkMode} onFileChange={handleFileChange} />
+    return (
+      <LandingView
+        darkMode={darkMode}
+        onFileChange={handleFileChange}
+        onRemoteUrlSubmit={handleRemoteUrlSubmit}
+      />
+    )
   }
 
   // 4. File Loaded UI

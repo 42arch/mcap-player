@@ -8,8 +8,9 @@ function Slider({
   value,
   min = 0,
   max = 100,
+  trackOverlay,
   ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+}: React.ComponentProps<typeof SliderPrimitive.Root> & { trackOverlay?: React.ReactNode }) {
   const _values = React.useMemo(
     () =>
       Array.isArray(value)
@@ -37,6 +38,7 @@ function Slider({
         data-slot="slider-track"
         className="relative grow overflow-hidden rounded-md bg-muted data-horizontal:h-1 data-horizontal:w-full data-vertical:h-full data-vertical:w-1"
       >
+        {trackOverlay}
         <SliderPrimitive.Range
           data-slot="slider-range"
           className="absolute bg-primary select-none data-horizontal:h-full data-vertical:w-full"

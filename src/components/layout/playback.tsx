@@ -1,5 +1,5 @@
-import { FastForward, Pause, Play, Rewind } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { FastForward, Info, Pause, Play, Rewind } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
@@ -11,8 +11,48 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { usePlaybackControls } from '@/hooks/use-playback'
-import { formatDuration, formatNanoseconds } from '@/lib/time'
+import { formatBytes, formatDuration, formatNanoseconds } from '@/lib/time'
+import { usePlayerStore } from '@/stores/use-player-store'
+
+interface RemoteLoadTrackOverlayProps {
+  ranges: ReadonlyArray<{ startNs: bigint, endNs: bigint }>
+  startNs: bigint
+  endNs: bigint
+}
+
+function getTrackPercent(valueNs: bigint, startNs: bigint, durationNs: bigint): number {
+  if (durationNs <= 0n) {
+    return 0
+  }
+  const scaled = ((valueNs - startNs) * 100_000n) / durationNs
+  return Math.max(0, Math.min(100, Number(scaled) / 1000))
+}
+
+function RemoteLoadTrackOverlay({ ranges, startNs, endNs }: RemoteLoadTrackOverlayProps) {
+  const durationNs = endNs - startNs
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      {ranges.map((range) => {
+        const rangeStart = range.startNs > startNs ? range.startNs : startNs
+        const rangeEnd = range.endNs < endNs ? range.endNs : endNs
+        const left = getTrackPercent(rangeStart, startNs, durationNs)
+        const right = getTrackPercent(rangeEnd, startNs, durationNs)
+        if (right <= left) {
+          return null
+        }
+        return (
+          <div
+            key={`${range.startNs}:${range.endNs}`}
+            className="absolute inset-y-0 rounded-sm bg-primary/35"
+            style={{ left: `${left}%`, width: `${right - left}%` }}
+          />
+        )
+      })}
+    </div>
+  )
+}
 
 export default function Playback() {
   const intl = useIntl()
@@ -27,12 +67,16 @@ export default function Playback() {
     stepBackward,
     stepForward,
     setPlaybackSpeed,
+    downloadAllRemoteBlocks,
     playbackSpeed,
     elapsedSeconds,
     durationSeconds,
     startNs,
     fileSummary,
   } = usePlaybackControls()
+  const remoteLoadProgress = usePlayerStore(state => state.remoteLoadProgress)
+  const isRemoteBuffering = usePlayerStore(state => state.isRemoteBuffering)
+  const isRemoteFullDownloadRunning = usePlayerStore(state => state.isRemoteFullDownloadRunning)
 
   const displayedSeconds = scrubSeconds ?? elapsedSeconds
   const elapsedNs = BigInt(Math.round(displayedSeconds * 1_000_000_000))
@@ -42,6 +86,18 @@ export default function Playback() {
 
   const hoverElapsedNs = hoverInfo ? BigInt(Math.round(hoverInfo.seconds * 1_000_000_000)) : 0n
   const hoverRealNs = fileSummary && hoverInfo ? startNs + hoverElapsedNs : 0n
+  const remoteTrackOverlay = useMemo(() => {
+    if (!remoteLoadProgress || !fileSummary || fileSummary.endNs <= fileSummary.startNs) {
+      return undefined
+    }
+    return (
+      <RemoteLoadTrackOverlay
+        ranges={remoteLoadProgress.playableTimeRanges}
+        startNs={fileSummary.startNs}
+        endNs={fileSummary.endNs}
+      />
+    )
+  }, [fileSummary, remoteLoadProgress])
 
   const tooltipRef = useRef<HTMLDivElement>(null)
   const hoverRealTextRef = useRef<HTMLDivElement>(null)
@@ -106,7 +162,7 @@ export default function Playback() {
       {/* Progress Slider (Top Row) */}
       <div
         ref={sliderContainerRef}
-        className="relative w-full flex items-center py-1 cursor-pointer"
+        className="relative flex min-h-5 w-full shrink-0 items-center py-1 cursor-pointer"
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
       >
@@ -124,6 +180,7 @@ export default function Playback() {
           }}
           disabled={durationSeconds === 0}
           className="w-full cursor-pointer"
+          trackOverlay={remoteTrackOverlay}
         />
 
         {/* Zero-latency Hover Time Tooltip via Direct DOM & Portal */}
@@ -216,6 +273,48 @@ export default function Playback() {
           >
             <FastForward className="w-3.5 h-3.5" />
           </Button>
+
+          {remoteLoadProgress ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={isRemoteBuffering ? 'text-amber-500' : remoteLoadProgress.isPersistedComplete ? 'text-emerald-500' : undefined}
+                  onClick={() => void downloadAllRemoteBlocks()}
+                  disabled={isRemoteFullDownloadRunning || remoteLoadProgress.isPersistedComplete}
+                >
+                  <Info className="w-3.5 h-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent className="whitespace-pre-line text-left">
+                {`${intl.formatMessage({
+                  id: remoteLoadProgress.isPersistedComplete
+                    ? 'playback.remoteAvailableOffline'
+                    : isRemoteFullDownloadRunning
+                      ? 'playback.remoteCachingAll'
+                      : 'playback.remoteCacheAll',
+                  defaultMessage: remoteLoadProgress.isPersistedComplete
+                    ? 'Session cache complete'
+                    : isRemoteFullDownloadRunning
+                      ? 'Caching all data…'
+                      : 'Cache all data',
+                })}\n${intl.formatMessage(
+                  { id: 'playback.remoteLoadProgress', defaultMessage: 'Fetched {fetched} / {total} ({fetchedPercent}%) · Session cache {stored} ({storedPercent}%)' },
+                  {
+                    fetched: formatBytes(remoteLoadProgress.downloadedBytes),
+                    total: formatBytes(remoteLoadProgress.totalBytes),
+                    fetchedPercent: Math.round(remoteLoadProgress.percent),
+                    stored: formatBytes(remoteLoadProgress.persistedBytes),
+                    storedPercent: Math.round(remoteLoadProgress.persistedPercent),
+                  },
+                )}\n${intl.formatMessage(
+                  { id: 'playback.remoteMemoryCache', defaultMessage: 'Memory cache {resident}' },
+                  { resident: formatBytes(remoteLoadProgress.residentBytes) },
+                )}`}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
 
         {/* Right: Time Text */}

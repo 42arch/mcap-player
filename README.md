@@ -2,6 +2,9 @@
 ## 测试数据
 
 在 docs/data/ 目录下
+远程：https://rosview-samples-1328702871.cos.accelerate.myqcloud.com/RealMan_PicknPlace.mcap
+
+https://mcap-proxy.lichtblick.workers.dev/NuScenes-v1.0-mini-scene-sample.mcap
 
 ## 开发文档
 

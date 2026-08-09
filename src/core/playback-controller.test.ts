@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { McapSource } from '@/core/sources/mcap-source'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
 import { PlaybackClock } from './playback-clock'
@@ -41,7 +42,7 @@ function createControllerWithPendingBackfill() {
   return { clock, controller, fast, media, spatial, worker }
 }
 
-describe('playback controller seek gating', () => {
+describe('playback controller', () => {
   afterEach(() => {
     usePlayerStore.getState().setIsPlaying(false)
     vi.restoreAllMocks()
@@ -121,5 +122,85 @@ describe('playback controller seek gating', () => {
 
     media.resolve([])
     controller.pause()
+  })
+
+  it('freezes remote playback until its continuous time buffer reaches the resume waterline', async () => {
+    const progress = deferred<any>()
+    const clock = new PlaybackClock(0n, 20_000_000_000n)
+    const controller = new PlaybackController()
+    const worker = {
+      prefetchTimeRange: vi.fn(() => progress.promise),
+    }
+    Object.assign(controller as any, {
+      clock,
+      fileSummary: { startNs: 0n, endNs: 20_000_000_000n, channels: [] },
+      worker,
+      isRemoteSource: true,
+      remoteRangeBufferingAvailable: true,
+      remotePlayableTimeRanges: [],
+    })
+    clock.play()
+
+    ;(controller as any).maintainRemoteBuffer(2_000_000_000n)
+
+    expect(clock.getIsPlaying()).toBe(false)
+    expect(usePlayerStore.getState().isRemoteBuffering).toBe(true)
+    expect(worker.prefetchTimeRange).toHaveBeenCalledWith(2_000_000_000n, 4_000_000_000n)
+
+    progress.resolve({
+      downloadedBytes: 1,
+      totalBytes: 1,
+      percent: 100,
+      downloadedByteRanges: [{ start: 0, end: 1 }],
+      residentBytes: 1,
+      residentByteRanges: [{ start: 0, end: 1 }],
+      persistedBytes: 1,
+      persistedByteRanges: [{ start: 0, end: 1 }],
+      persistedPercent: 100,
+      isPersistedComplete: true,
+      playableTimeRanges: [{ startNs: 0n, endNs: 15_000_000_000n }],
+      hasIndexedChunkCoverage: true,
+    })
+
+    await vi.waitFor(() => expect(clock.getIsPlaying()).toBe(true))
+    expect(usePlayerStore.getState().isRemoteBuffering).toBe(false)
+    controller.pause()
+  })
+
+  it('prefetches the initial remote window as soon as the source opens', async () => {
+    const summary = {
+      startNs: 2_000_000_000n,
+      endNs: 22_000_000_000n,
+      channels: [],
+    }
+    const worker = {
+      initialize: vi.fn().mockResolvedValue(summary),
+      prefetchTimeRange: vi.fn().mockResolvedValue(null),
+      closeSource: vi.fn().mockResolvedValue(undefined),
+    }
+    const seekWorker = {
+      initialize: vi.fn().mockResolvedValue(summary),
+      closeSource: vi.fn().mockResolvedValue(undefined),
+    }
+    const controller = new PlaybackController()
+    Object.assign(controller as unknown as Record<string, unknown>, {
+      worker,
+      seekWorker,
+      prepareRemoteCache: vi.fn(async (source: Extract<McapSource, { kind: 'remote' }>) => ({
+        ...source,
+        knownSize: 1024,
+      })),
+      startRemoteProgressPolling: vi.fn(),
+    })
+
+    await controller.loadSource({
+      kind: 'remote',
+      url: 'https://example.com/recording.mcap',
+      name: 'recording.mcap',
+    })
+
+    expect(worker.prefetchTimeRange).toHaveBeenCalledWith(2_000_000_000n, 4_000_000_000n)
+    expect(usePlayerStore.getState().isPlaying).toBe(false)
+    controller.closeFile()
   })
 })
