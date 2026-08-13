@@ -1,5 +1,5 @@
 import type { Ref } from 'react'
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import UPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 
@@ -50,8 +50,19 @@ function UPlotChart({
 }: UPlotChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const uplotRef = useRef<UPlot | null>(null)
+
+  const safeData = useMemo(() => {
+    const expectedLen = options.series?.length
+    if (!expectedLen || data.length === expectedLen) {
+      return data
+    }
+    const xData = data[0] || []
+    const series = Array.from({ length: expectedLen - 1 }, (_, i) => data[i + 1] || [])
+    return [xData, ...series] as UPlot.AlignedData
+  }, [data, options.series])
+
   const optionsRef = useRef(options)
-  const dataRef = useRef(data)
+  const dataRef = useRef(safeData)
   const onClickRef = useRef(onClick)
   const onDataRef = useRef(onData)
   const onDoubleClickRef = useRef(onDoubleClick)
@@ -72,7 +83,7 @@ function UPlotChart({
   }
 
   optionsRef.current = options
-  dataRef.current = data
+  dataRef.current = safeData
   onClickRef.current = onClick
   onDataRef.current = onData
   onDoubleClickRef.current = onDoubleClick
@@ -313,9 +324,9 @@ function UPlotChart({
       return
     }
 
-    chart.setData(data)
+    chart.setData(safeData)
     onDataRef.current?.(chart)
-  }, [data])
+  }, [safeData])
 
   return <div ref={containerRef} className={className} />
 }

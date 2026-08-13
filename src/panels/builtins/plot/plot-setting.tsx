@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid'
 import { useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ColorPicker } from '@/components/ui/color-picker'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
   SelectContent,
@@ -69,7 +70,7 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
 
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background text-foreground">
-      <div className="flex-1 overflow-y-auto">
+      <ScrollArea className="flex-1 min-h-0">
         {/* Plot Series Group */}
         <SettingGroup
           title={`Plot Series (${plotSeries.length})`}
@@ -224,7 +225,7 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
             )}
           </div>
         </SettingGroup>
-      </div>
+      </ScrollArea>
     </div>
   )
 }

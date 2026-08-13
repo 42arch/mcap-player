@@ -16,7 +16,7 @@ import { usePlayerStore } from '@/stores/use-player-store'
 // Helper function to merge multiple series data sets into one aligned time series
 function mergeTimeSeries(datasets: Array<Pick<PlotSeriesData, 'times' | 'values'>>): uPlot.AlignedData {
   if (datasets.length === 0) {
-    return [[], []]
+    return [[]]
   }
 
   // 1. Collect all unique time points and sort them
@@ -91,6 +91,16 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
     [activeSeries.length],
   )
   const [chartData, setChartData] = useState<UPlot.AlignedData>(emptyChartData)
+
+  const normalizedChartData = useMemo(() => {
+    const expectedLength = activeSeries.length + 1
+    if (chartData.length === expectedLength) {
+      return chartData
+    }
+    const timeAxis = chartData[0] || []
+    const series = Array.from({ length: activeSeries.length }, (_, i) => chartData[i + 1] || [])
+    return [timeAxis, ...series] as UPlot.AlignedData
+  }, [activeSeries.length, chartData])
 
   const dataSeriesKey = JSON.stringify(
     activeSeries.map(series => ({
@@ -497,7 +507,7 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
                     <UPlotChart
                       ref={chartRef}
                       className="w-full h-full min-h-0 relative flex items-center justify-center"
-                      data={chartData}
+                      data={normalizedChartData}
                       onClick={handleChartClick}
                       onData={handleChartData}
                       onDoubleClick={handleChartDoubleClick}
