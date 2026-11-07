@@ -2,39 +2,30 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
-
-concurrency: ${{ github.workflow }}-${{ github.ref }}
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   release:
-    name: Release & Version PR
+    name: Publish GitHub Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.3
-
-      - name: Install Dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Create Version PR or Release
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: bun run version-packages
-          commit: 'chore(release): version packages'
-          title: 'chore(release): version packages'
+      - name: Create GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          awk '
+            /^## / { found++; if (found == 2) exit; next }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "$RELEASE_TAG" > release-notes.md
+          fi
+          gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file release-notes.md

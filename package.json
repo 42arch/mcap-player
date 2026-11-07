@@ -17,7 +17,7 @@
     "lint:fix": "eslint --fix",
     "test": "vitest run",
     "changelog": "changelogen --output CHANGELOG.md",
-    "release": "bumpp"
+    "release": "bumpp --all"
   },
   "dependencies": {
     "@foxglove/rosmsg": "^5.0.5",
