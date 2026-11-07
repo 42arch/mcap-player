@@ -3,11 +3,59 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MCAP Player</title>
+    <meta name="google-site-verification" content="qqK9enABbt2nZjMlp531oTenX3o2-CXlDVlcyi9X_Kg" />
+    <title>MCAP Player — Browser Viewer for MCAP Files</title>
+    <meta
+      name="description"
+      content="Play and visualize MCAP files in the browser. Inspect ROS, Protobuf, images, plots, maps, and 3D scenes from local files or remote URLs."
+    />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://mcap-player.netlify.app/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MCAP Player" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:url" content="https://mcap-player.netlify.app/" />
+    <meta property="og:title" content="MCAP Player — Browser Viewer for MCAP Files" />
+    <meta
+      property="og:description"
+      content="Play and visualize MCAP files in the browser. Inspect ROS, Protobuf, images, plots, maps, and 3D scenes from local files or remote URLs."
+    />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MCAP Player — Browser Viewer for MCAP Files" />
+    <meta
+      name="twitter:description"
+      content="Play and visualize MCAP files in the browser. Inspect ROS, Protobuf, images, plots, maps, and 3D scenes from local files or remote URLs."
+    />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "MCAP Player",
+        "url": "https://mcap-player.netlify.app/",
+        "description": "Play and visualize MCAP files in the browser. Inspect ROS, Protobuf, images, plots, maps, and 3D scenes from local files or remote URLs.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "inLanguage": ["en", "zh-Hans"]
+      }
+    </script>
   </head>
   <body class="min-h-full flex flex-col bg-background text-foreground">
     <div id="root" class="min-h-full flex flex-col flex-1"></div>
+    <noscript>
+      <main>
+        <h1>MCAP Player</h1>
+        <p>
+          Play and visualize MCAP files in the browser. Inspect ROS 1, ROS 2, and Protobuf messages, camera images, plots, maps, and 3D scenes. Open a local file or stream one from a remote URL. Uncompressed, Zstd, and LZ4 chunks are supported.
+        </p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-import type { Map as MapLibreMap } from 'maplibre-gl'
+import type { ErrorEvent, Map as MapLibreMap } from 'maplibre-gl'
 import type { MapPanelConfig, PanelComponentProps } from '@/panels/core/types'
 import { Compass, LocateFixed, Maximize2, Minus, Navigation, Plus } from 'lucide-react'
 import { Map as MapLibreMapConstructor, ScaleControl } from 'maplibre-gl'
@@ -99,12 +99,12 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
       setMapStatus('ready')
       scheduleFlush()
     }
-    const onError = (event: { error?: Error }) => {
+    const onError = (event: ErrorEvent) => {
       if (mapLoaded) {
         console.warn('Map tile or resource failed to load:', event.error)
         return
       }
-      const message = event.error?.message || 'Failed to load map style or tiles.'
+      const message = event.error.message || 'Failed to load map style or tiles.'
       setMapError(message)
       setMapStatus('error')
     }

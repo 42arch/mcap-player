@@ -67,7 +67,16 @@ export default function LandingView({ darkMode, onFileChange, onRemoteUrlSubmit 
           <div className="mb-2 inline-flex rounded-2xl bg-primary/10 p-4 text-primary shadow-inner">
             <FolderOpen className="size-7" />
           </div>
-          <h2 className="text-lg font-bold tracking-tight text-foreground">
+          <h1 className="text-lg font-bold tracking-tight text-foreground">
+            <FormattedMessage id="landing.title" defaultMessage="MCAP Player" />
+          </h1>
+          <p className="mx-auto max-w-sm text-xs leading-relaxed text-muted-foreground">
+            <FormattedMessage
+              id="landing.description"
+              defaultMessage="A browser player for robotics and autonomous-driving recordings. Inspect ROS, Protobuf, images, plots, maps, and 3D scenes without uploading the file."
+            />
+          </p>
+          <h2 className="text-sm font-semibold tracking-tight text-foreground">
             <FormattedMessage id="landing.openFile" defaultMessage="Open MCAP File" />
           </h2>
           <p className="mx-auto max-w-sm text-xs leading-relaxed text-muted-foreground">
