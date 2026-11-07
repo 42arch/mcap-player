@@ -28,17 +28,15 @@ MCAP Player 可以直接打开本地文件，也可以通过 HTTP Range 请求�
 
 ### 环境要求
 
-- [Node.js](https://nodejs.org/) 24（以 `.nvmrc` 为准）
-- [pnpm](https://pnpm.io/)
+- [Bun](https://bun.sh/) 1.4.3（以 `package.json` 的 `packageManager` 为准）
 
 ### 本地运行
 
 ```bash
 git clone https://github.com/42arch/mcap-player.git
 cd mcap-player
-corepack enable
-pnpm install
-pnpm dev
+bun install
+bun run dev
 ```
 
 根据终端提示打开本地地址，通常为 `http://localhost:5173`。
@@ -46,7 +44,7 @@ pnpm dev
 ### 生产构建
 
 ```bash
-pnpm build
+bun run build
 ```
 
 ## 使用方法

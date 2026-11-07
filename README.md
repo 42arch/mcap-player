@@ -28,17 +28,15 @@ MCAP Player opens local files directly or streams remote files on demand using H
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 24, as specified in `.nvmrc`
-- [pnpm](https://pnpm.io/)
+- [Bun](https://bun.sh/) 1.4.3, as specified by `packageManager` in `package.json`
 
 ### Run Locally
 
 ```bash
 git clone https://github.com/42arch/mcap-player.git
 cd mcap-player
-corepack enable
-pnpm install
-pnpm dev
+bun install
+bun run dev
 ```
 
 Open the local URL shown in the terminal, usually `http://localhost:5173`.
@@ -46,7 +44,7 @@ Open the local URL shown in the terminal, usually `http://localhost:5173`.
 ### Production Build
 
 ```bash
-pnpm build
+bun run build
 ```
 
 ## Usage

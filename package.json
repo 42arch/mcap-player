@@ -69,10 +69,5 @@
     "vite": "^8.1.5",
     "vitest": "^4.1.9"
   },
-  "pnpm": {
-    "ignoredBuiltDependencies": [
-      "sharp",
-      "unrs-resolver"
-    ]
-  }
+  "packageManager": "bun@1.4.3"
 }
