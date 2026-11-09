@@ -1,8 +1,19 @@
 # Changelog
 
 
-## v1.0.0
+## v1.1.0
 
+### 🚀 Enhancements
+
+- Integrate PostHog analytics ([bd1256d](https://github.com/42arch/mcap-player/commit/bd1256d))
+- Implement default topic assignment for image and raw message panels ([acb4d8c](https://github.com/42arch/mcap-player/commit/acb4d8c))
+- Support default image grid layout, topic tree view, and full i18n ([24d0585](https://github.com/42arch/mcap-player/commit/24d0585))
+
+### ❤️ Contributors
+
+- 42arch ([@42arch](https://github.com/42arch))
+
+## v1.0.0
 
 ### 🚀 Release
 
