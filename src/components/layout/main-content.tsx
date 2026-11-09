@@ -1,5 +1,6 @@
 import { AlertCircle, Loader2 } from 'lucide-react'
 import { globalPlaybackController } from '@/core/playback-controller'
+import { useAnalytics } from '@/hooks/use-analytics'
 import { usePanelStore } from '@/stores/use-panel-store'
 import { usePlayerStore } from '@/stores/use-player-store'
 import LandingView from './landing-view'
@@ -10,6 +11,7 @@ interface MainContentProps {
 }
 
 export default function MainContent({ darkMode }: MainContentProps) {
+  const { captureMcapOpened } = useAnalytics()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const isLoading = usePlayerStore(state => state.isLoading)
   const loadingMessage = usePlayerStore(state => state.loadingMessage)
@@ -26,6 +28,11 @@ export default function MainContent({ darkMode }: MainContentProps) {
 
     resetPanels()
     setIsLoading(true, 'Initializing decompression handlers...')
+    captureMcapOpened({
+      source: 'landing',
+      method: 'local',
+      fileSizeBytes: file.size,
+    })
     try {
       await globalPlaybackController.loadFile(file)
     }

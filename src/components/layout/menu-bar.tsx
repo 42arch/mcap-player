@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/menubar'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { createRemoteMcapSource } from '@/core/sources/mcap-source'
+import { useAnalytics } from '@/hooks/use-analytics'
 import { buildExportData, downloadJsonFile, parseAndValidateConfig } from '@/panels/core/config-io'
 import { useLocaleStore } from '@/stores/use-locale-store'
 import { usePanelStore } from '@/stores/use-panel-store'
@@ -29,6 +30,7 @@ import { usePlayerStore } from '@/stores/use-player-store'
 import { formatRemoteUrlError } from './remote-url-error'
 
 export default function MenuBar() {
+  const { captureMcapOpened } = useAnalytics()
   const { formatMessage } = useIntl()
   const { theme, setTheme } = useTheme()
   const locale = useLocaleStore(state => state.locale)
@@ -55,6 +57,11 @@ export default function MenuBar() {
 
     resetPanels()
     setIsLoading(true, 'Reading MCAP file...')
+    captureMcapOpened({
+      source: 'menu',
+      method: 'local',
+      fileSizeBytes: file.size,
+    })
     try {
       await globalPlaybackController.loadFile(file)
     }
@@ -87,6 +94,7 @@ export default function MenuBar() {
       return
     }
 
+    captureMcapOpened({ source: 'menu', method: 'remote' })
     resetPanels()
     setIsLoading(true, 'Reading remote MCAP indexes...')
     try {

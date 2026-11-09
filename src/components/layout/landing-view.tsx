@@ -6,6 +6,7 @@ import { Field, FieldError, FieldGroup } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { createRemoteMcapSource } from '@/core/sources/mcap-source'
+import { useAnalytics } from '@/hooks/use-analytics'
 import { formatRemoteUrlError } from './remote-url-error'
 
 interface LandingViewProps {
@@ -27,6 +28,7 @@ const EXAMPLE_MCAP_FILES = [
 ] as const
 
 export default function LandingView({ darkMode, onFileChange, onRemoteUrlSubmit }: LandingViewProps) {
+  const { captureMcapOpened } = useAnalytics()
   const { formatMessage } = useIntl()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [remoteUrl, setRemoteUrl] = useState('')
@@ -37,6 +39,7 @@ export default function LandingView({ darkMode, onFileChange, onRemoteUrlSubmit 
     setRemoteError(null)
     try {
       const source = createRemoteMcapSource(remoteUrl)
+      captureMcapOpened({ source: 'landing', method: 'remote' })
       void onRemoteUrlSubmit(source.url)
     }
     catch (error) {
@@ -151,7 +154,14 @@ export default function LandingView({ darkMode, onFileChange, onRemoteUrlSubmit 
                     size="lg"
                     className="min-w-0 flex-1 justify-start"
                     title={example.url}
-                    onClick={() => void onRemoteUrlSubmit(example.url)}
+                    onClick={() => {
+                      captureMcapOpened({
+                        source: 'landing',
+                        method: 'example',
+                        exampleId: example.id,
+                      })
+                      void onRemoteUrlSubmit(example.url)
+                    }}
                   >
                     <CarFront data-icon="inline-start" />
                     <span className="truncate">
