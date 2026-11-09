@@ -2,6 +2,7 @@ import type { PanelSettingsProps, PlotPanelConfig } from '@/panels/core/types'
 import { Plus, Trash2 } from 'lucide-react'
 import { nanoid } from 'nanoid'
 import { useEffect } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
 import { ColorPicker } from '@/components/ui/color-picker'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -18,6 +19,7 @@ import { usePlayerStore } from '@/stores/use-player-store'
 import { SettingGroup } from '../setting-group'
 
 export default function PlotSetting({ config, updateConfig }: PanelSettingsProps<PlotPanelConfig>) {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const plotSeries = config.series
   const availablePlotFields = config.availableFieldsByTopic
@@ -73,14 +75,14 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
       <ScrollArea className="flex-1 min-h-0">
         {/* Plot Series Group */}
         <SettingGroup
-          title={`Plot Series (${plotSeries.length})`}
+          title={intl.formatMessage({ id: 'panel.plot.seriesCount', defaultMessage: 'Plot Series ({count})' }, { count: plotSeries.length })}
           defaultOpen
           action={(
             <Button
               variant="ghost"
               size="icon-xs"
               onClick={addPlotSeries}
-              title="Add Series"
+              title={intl.formatMessage({ id: 'panel.plot.addSeries', defaultMessage: 'Add Series' })}
             >
               <Plus className="size-3.5" />
             </Button>
@@ -103,7 +105,7 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
                     <button
                       onClick={() => removePlotSeries(s.id)}
                       className="text-muted-foreground hover:text-destructive opacity-40 group-hover:opacity-100 transition-all p-1 cursor-pointer"
-                      title="Delete Series"
+                      title={intl.formatMessage({ id: 'panel.plot.deleteSeries', defaultMessage: 'Delete Series' })}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -111,13 +113,15 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
 
                   {/* Topic Selector */}
                   <div className="space-y-1">
-                    <span className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider block">Topic</span>
+                    <span className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider block">
+                      <FormattedMessage id="panel.plot.topic" defaultMessage="Topic" />
+                    </span>
                     <Select
                       value={s.topic}
                       onValueChange={val => updatePlotSeries(s.id, { topic: val, path: '' })}
                     >
                       <SelectTrigger className="w-full bg-background border-border text-[10px] h-7 px-2 font-mono truncate">
-                        <SelectValue placeholder="Select topic..." />
+                        <SelectValue placeholder={intl.formatMessage({ id: 'panel.plot.selectTopic', defaultMessage: 'Select topic...' })} />
                       </SelectTrigger>
                       <SelectContent position="popper" className="bg-popover text-popover-foreground max-h-52">
                         {channels.map(ch => (
@@ -131,7 +135,9 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
 
                   {/* Path Selector */}
                   <div className="space-y-1">
-                    <span className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider block">Y-Value Path</span>
+                    <span className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider block">
+                      <FormattedMessage id="panel.plot.valuePath" defaultMessage="Y-Value Path" />
+                    </span>
                     {s.topic
                       ? (
                           fields.length > 0
@@ -141,7 +147,7 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
                                   onValueChange={val => updatePlotSeries(s.id, { path: val })}
                                 >
                                   <SelectTrigger className="w-full bg-background border-border text-[10px] h-7 px-2 font-mono truncate">
-                                    <SelectValue placeholder="Select numeric field..." />
+                                    <SelectValue placeholder={intl.formatMessage({ id: 'panel.plot.selectField', defaultMessage: 'Select numeric field...' })} />
                                   </SelectTrigger>
                                   <SelectContent position="popper" className="bg-popover text-popover-foreground max-h-52">
                                     {fields.map(f => (
@@ -154,13 +160,13 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
                               )
                             : (
                                 <div className="p-2 bg-muted/30 border border-border/80 rounded-md text-[9px] text-muted-foreground select-none">
-                                  No numeric fields detected. Please play the file.
+                                  <FormattedMessage id="panel.plot.noFields" defaultMessage="No numeric fields detected. Please play the file." />
                                 </div>
                               )
                         )
                       : (
                           <div className="p-2 bg-muted/20 border border-dashed border-border rounded-md text-[9px] text-muted-foreground select-none text-center">
-                            Select a topic first
+                            <FormattedMessage id="panel.plot.selectTopicFirst" defaultMessage="Select a topic first" />
                           </div>
                         )}
                   </div>
@@ -169,7 +175,9 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
                   <div className="grid grid-cols-3 gap-2 pt-1.5 border-t border-border/40">
                     {/* Style */}
                     <div className="space-y-1">
-                      <span className="text-[8px] text-muted-foreground font-bold uppercase block">Style</span>
+                      <span className="text-[8px] text-muted-foreground font-bold uppercase block">
+                        <FormattedMessage id="panel.plot.style" defaultMessage="Style" />
+                      </span>
                       <Select
                         value={s.lineStyle}
                         onValueChange={val => updatePlotSeries(s.id, { lineStyle: val as 'solid' | 'dashed' })}
@@ -178,15 +186,21 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent position="popper" className="bg-popover text-popover-foreground text-[10px]">
-                          <SelectItem value="solid" className="text-[10px] py-1">Solid</SelectItem>
-                          <SelectItem value="dashed" className="text-[10px] py-1">Dashed</SelectItem>
+                          <SelectItem value="solid" className="text-[10px] py-1">
+                            <FormattedMessage id="panel.plot.styleSolid" defaultMessage="Solid" />
+                          </SelectItem>
+                          <SelectItem value="dashed" className="text-[10px] py-1">
+                            <FormattedMessage id="panel.plot.styleDashed" defaultMessage="Dashed" />
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
 
                     {/* Width */}
                     <div className="space-y-1">
-                      <span className="text-[8px] text-muted-foreground font-bold uppercase block">Width</span>
+                      <span className="text-[8px] text-muted-foreground font-bold uppercase block">
+                        <FormattedMessage id="panel.plot.width" defaultMessage="Width" />
+                      </span>
                       <Select
                         value={String(s.lineWidth)}
                         onValueChange={val => updatePlotSeries(s.id, { lineWidth: Number(val) })}
@@ -207,7 +221,9 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
 
                     {/* Color */}
                     <div className="space-y-1">
-                      <span className="text-[8px] text-muted-foreground font-bold uppercase block">Color</span>
+                      <span className="text-[8px] text-muted-foreground font-bold uppercase block">
+                        <FormattedMessage id="panel.plot.color" defaultMessage="Color" />
+                      </span>
                       <ColorPicker
                         value={s.color}
                         onChange={color => updatePlotSeries(s.id, { color })}
@@ -220,7 +236,7 @@ export default function PlotSetting({ config, updateConfig }: PanelSettingsProps
 
             {plotSeries.length === 0 && (
               <div className="p-6 text-center text-muted-foreground border border-dashed border-border rounded-lg text-[10px]">
-                No active series. Click "Add Series" to start visualizing metrics.
+                <FormattedMessage id="panel.plot.emptySeries" defaultMessage="No active series. Click \"Add Series\" to start visualizing metrics." />
               </div>
             )}
           </div>

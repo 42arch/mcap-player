@@ -1,5 +1,6 @@
 import type { ImagePanelConfig, PanelComponentProps } from '@/panels/core/types'
 import { useEffect, useRef, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import {
   Select,
   SelectContent,
@@ -319,6 +320,7 @@ function ImageViewer(props: ImageViewerProps) {
 }
 
 export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelConfig>) {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const [config, updateConfig] = usePanelConfig<ImagePanelConfig>()
   const activeTopic = config.topic
@@ -331,7 +333,9 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
       <PanelContentHeader
         actions={fileSummary && imageChannels.length > 0 && (
           <div className="flex min-w-0 items-center gap-2">
-            <span className="text-[9px] font-semibold tracking-wider uppercase text-muted-foreground shrink-0 hidden @[460px]:inline-block">Topic</span>
+            <span className="text-[9px] font-semibold tracking-wider uppercase text-muted-foreground shrink-0 hidden @[460px]:inline-block">
+              <FormattedMessage id="panel.image.topic" defaultMessage="Topic" />
+            </span>
             <Select
               value={activeTopic || ''}
               onValueChange={(val) => {
@@ -339,7 +343,7 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
               }}
             >
               <SelectTrigger size="sm" className="w-48 max-w-full @[460px]:w-48 @[340px]:w-36 bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
-                <SelectValue placeholder="Select image topic..." />
+                <SelectValue placeholder={intl.formatMessage({ id: 'panel.image.selectTopic', defaultMessage: 'Select image topic...' })} />
               </SelectTrigger>
               <SelectContent position="popper" className="bg-popover text-popover-foreground">
                 {imageChannels.map(ch => (
@@ -357,18 +361,28 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
       {imageChannels.length === 0
         ? (
             <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
-              <p className="text-xs font-semibold">No Image Channels Available</p>
+              <p className="text-xs font-semibold">
+                <FormattedMessage id="panel.image.noChannels" defaultMessage="No Image Channels Available" />
+              </p>
               <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                No topics with schema type matching sensor_msgs/Image or sensor_msgs/CompressedImage were found in this file.
+                <FormattedMessage
+                  id="panel.image.noChannelsDesc"
+                  defaultMessage="No topics with schema type matching sensor_msgs/Image or sensor_msgs/CompressedImage were found in this file."
+                />
               </p>
             </div>
           )
         : !activeTopic
             ? (
                 <div className="flex-1 flex flex-col h-full items-center justify-center p-8 text-center text-muted-foreground bg-card">
-                  <p className="text-xs font-semibold">No Topic Selected</p>
+                  <p className="text-xs font-semibold">
+                    <FormattedMessage id="panel.image.noTopicSelected" defaultMessage="No Topic Selected" />
+                  </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                    Please select an active camera topic from the dropdown selector in the header to view the frame.
+                    <FormattedMessage
+                      id="panel.image.selectTopicHint"
+                      defaultMessage="Please select an active camera topic from the dropdown selector in the header to view the frame."
+                    />
                   </p>
                 </div>
               )

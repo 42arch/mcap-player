@@ -1,5 +1,6 @@
 import { Check, ChevronDown, ChevronRight, Copy } from 'lucide-react'
 import { memo, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { cn } from '@/lib/utils'
 
 interface JsonRowProps {
@@ -11,6 +12,7 @@ interface JsonRowProps {
 }
 
 const JsonRow = memo(({ className, indentClass, onClick, copyText, children }: JsonRowProps) => {
+  const intl = useIntl()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async (e: React.MouseEvent) => {
@@ -41,7 +43,7 @@ const JsonRow = memo(({ className, indentClass, onClick, copyText, children }: J
       <button
         onClick={handleCopy}
         className="opacity-0 group-hover/row:opacity-100 ml-1 p-0.5 text-muted-foreground hover:text-primary hover:bg-muted/80 shrink-0 transition-opacity rounded-xs"
-        title="Copy line"
+        title={intl.formatMessage({ id: 'common.copyLine', defaultMessage: 'Copy line' })}
       >
         {copied
           ? (
@@ -271,16 +273,16 @@ export function MessageViewer({ data, binaryFormat = 'placeholder' }: MessageVie
         <div className="flex gap-2">
           <button
             onClick={handleExpandAll}
-            className="text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors"
+            className="text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors uppercase"
           >
-            EXPAND ALL
+            <FormattedMessage id="common.expandAll" defaultMessage="EXPAND ALL" />
           </button>
           <span className="text-border/50 font-mono">|</span>
           <button
             onClick={handleCollapseAll}
-            className="text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors"
+            className="text-muted-foreground hover:text-primary font-mono cursor-pointer transition-colors uppercase"
           >
-            COLLAPSE ALL
+            <FormattedMessage id="common.collapseAll" defaultMessage="COLLAPSE ALL" />
           </button>
         </div>
         <button
@@ -291,13 +293,17 @@ export function MessageViewer({ data, binaryFormat = 'placeholder' }: MessageVie
             ? (
                 <>
                   <Check className="w-2.5 h-2.5 text-emerald-500" />
-                  <span className="text-emerald-500 font-bold">COPIED!</span>
+                  <span className="text-emerald-500 font-bold">
+                    <FormattedMessage id="common.copied" defaultMessage="COPIED!" />
+                  </span>
                 </>
               )
             : (
                 <>
                   <Copy className="w-2.5 h-2.5" />
-                  <span>COPY RAW</span>
+                  <span className="uppercase">
+                    <FormattedMessage id="common.copyRaw" defaultMessage="COPY RAW" />
+                  </span>
                 </>
               )}
         </button>

@@ -1,5 +1,6 @@
 import type { PanelComponentProps, RawMessagePanelConfig } from '@/panels/core/types'
 import { useEffect, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { MessageViewer } from '@/components/common/message-viewer'
 import {
   Select,
@@ -83,9 +84,14 @@ function RawMessageViewer({ panelId, topic, refreshRateHz, binaryFormat }: RawMe
         <div className="relative flex items-center justify-center mb-3">
           <div className="w-5 h-5 border-2 border-primary/25 border-t-primary rounded-full animate-spin" />
         </div>
-        <p className="text-xs font-semibold">Waiting for message...</p>
+        <p className="text-xs font-semibold">
+          <FormattedMessage id="panel.messages.waiting" defaultMessage="Waiting for message..." />
+        </p>
         <p className="text-[10px] text-muted-foreground/60 mt-1">
-          Play the MCAP file or drag the timeline to see decoded topic payload.
+          <FormattedMessage
+            id="panel.messages.waitingDesc"
+            defaultMessage="Play the MCAP file or drag the timeline to see decoded topic payload."
+          />
         </p>
       </div>
     )
@@ -97,18 +103,18 @@ function RawMessageViewer({ panelId, topic, refreshRateHz, binaryFormat }: RawMe
       <div className="px-4 py-2 border-b border-border bg-muted/20 flex flex-wrap items-center justify-between gap-4 font-mono text-[10px] text-muted-foreground select-none">
         <div className="flex items-center gap-3">
           <span>
-            Sequence:
+            <FormattedMessage id="panel.messages.sequence" defaultMessage="Sequence:" />
             <span className="font-semibold text-foreground ml-1">{msg.sequence}</span>
           </span>
           <span className="text-border/40 select-none">|</span>
           <span>
-            Size:
+            <FormattedMessage id="panel.messages.size" defaultMessage="Size:" />
             <span className="font-semibold text-foreground ml-1">{formatBytes(msg.dataLength)}</span>
           </span>
         </div>
         <div>
           <span>
-            Log Time:
+            <FormattedMessage id="panel.messages.logTime" defaultMessage="Log Time:" />
             <span className="font-semibold text-foreground ml-1">{formatNanoseconds(msg.logTime)}</span>
           </span>
         </div>
@@ -123,6 +129,7 @@ function RawMessageViewer({ panelId, topic, refreshRateHz, binaryFormat }: RawMe
 }
 
 export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMessagePanelConfig>) {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const [config, updateConfig] = usePanelConfig<RawMessagePanelConfig>()
   const activeTopic = config.topic
@@ -134,7 +141,9 @@ export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMess
       <PanelContentHeader
         actions={fileSummary && channels.length > 0 && (
           <div className="flex min-w-0 items-center gap-2">
-            <span className="text-[9px] font-semibold tracking-wider uppercase text-muted-foreground shrink-0 hidden @[460px]:inline-block">Topic</span>
+            <span className="text-[9px] font-semibold tracking-wider uppercase text-muted-foreground shrink-0 hidden @[460px]:inline-block">
+              <FormattedMessage id="panel.messages.topic" defaultMessage="Topic" />
+            </span>
             <Select
               value={activeTopic || ''}
               onValueChange={(val) => {
@@ -142,7 +151,7 @@ export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMess
               }}
             >
               <SelectTrigger size="sm" className="w-48 max-w-full @[460px]:w-48 @[340px]:w-36 bg-background border-border/80 text-[10px] h-6 py-0.5 px-2 font-mono">
-                <SelectValue placeholder="Select topic..." />
+                <SelectValue placeholder={intl.formatMessage({ id: 'panel.messages.selectTopic', defaultMessage: 'Select topic...' })} />
               </SelectTrigger>
               <SelectContent position="popper" className="bg-popover text-popover-foreground">
                 {channels.map(ch => (
@@ -160,9 +169,14 @@ export default function RawMessagePanel({ panelId }: PanelComponentProps<RawMess
       {!activeTopic
         ? (
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-muted-foreground bg-card">
-              <p className="text-xs font-semibold">No Topic Selected</p>
+              <p className="text-xs font-semibold">
+                <FormattedMessage id="panel.messages.noTopicSelected" defaultMessage="No Topic Selected" />
+              </p>
               <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-[240px] leading-relaxed">
-                Please select an active topic from the dropdown selector in the header to inspect its payload details.
+                <FormattedMessage
+                  id="panel.messages.selectTopicHint"
+                  defaultMessage="Please select an active topic from the dropdown selector in the header to inspect its payload details."
+                />
               </p>
             </div>
           )

@@ -3,9 +3,11 @@ import { DockviewReact, themeDark, themeLight } from 'dockview-react'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useState } from 'react'
 import { registerBuiltInPanels } from '@/panels/builtins/register-builtins'
+import { computeGridPosition, planInitialPanels } from '@/panels/core/default-layout'
 import { getPanelDefinition } from '@/panels/core/panel-registry'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePanelStore } from '@/stores/use-panel-store'
+import { usePlayerStore } from '@/stores/use-player-store'
 import PanelGroupActions from './panel-group-actions'
 import PanelHost from './panel-host'
 import PanelTab from './panel-tab'
@@ -19,36 +21,39 @@ const dockviewComponents = { panel: PanelHost }
 export default function PanelWorkspace() {
   const { resolvedTheme } = useTheme()
   const panelOrder = usePanelStore(state => state.panelOrder)
-  const addPanel = usePanelStore(state => state.addPanel)
+  const addPanels = usePanelStore(state => state.addPanels)
   const removePanel = usePanelStore(state => state.removePanel)
   const setActivePanel = usePanelStore(state => state.setActivePanel)
   const setSelectedPanel = usePanelStore(state => state.setSelectedPanel)
   const setDockviewApi = usePanelStore(state => state.setDockviewApi)
   const [api, setApi] = useState<DockviewApi | null>(null)
 
-  const addPanelToWorkspace = useCallback((type: string) => {
-    if (!api) {
-      return
-    }
-    const definition = getPanelDefinition(type)
-    if (!definition) {
-      return
-    }
-    const panelId = addPanel(type)
-    api.addPanel({
-      id: panelId,
-      component: 'panel',
-      title: definition.title,
-      params: { panelId },
-    })
-  }, [addPanel, api])
-
   useEffect(() => {
     if (!api) {
       return
     }
     if (panelOrder.length === 0) {
-      addPanelToWorkspace('overview')
+      const channels = usePlayerStore.getState().fileSummary?.channels ?? []
+      const initialPanels = planInitialPanels(channels)
+      const panelIds = addPanels(initialPanels)
+
+      for (let i = 0; i < panelIds.length; i++) {
+        const panelId = panelIds[i]
+        const spec = initialPanels[i]
+        const definition = getPanelDefinition(spec.type)
+        if (!definition) {
+          continue
+        }
+
+        const position = computeGridPosition(i, panelIds.length, panelIds)
+        api.addPanel({
+          id: panelId,
+          component: 'panel',
+          title: definition.title,
+          params: { panelId },
+          ...(position ? { position } : {}),
+        })
+      }
       return
     }
 
@@ -68,7 +73,7 @@ export default function PanelWorkspace() {
         })
       }
     }
-  }, [addPanelToWorkspace, api, panelOrder])
+  }, [addPanels, api, panelOrder])
 
   useEffect(() => {
     if (!api) {

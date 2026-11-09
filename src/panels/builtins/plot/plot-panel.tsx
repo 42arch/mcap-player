@@ -5,6 +5,7 @@ import type { PanelComponentProps, PlotPanelConfig } from '@/panels/core/types'
 import { ChevronRight, Eye, EyeClosed, Layers, Loader2 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import UPlotChart from '@/components/common/uplot-chart'
 import { globalPlaybackController } from '@/core/playback-controller'
 import { getPlaybackElapsedNs, subscribePlaybackTime } from '@/core/playback-time-store'
@@ -54,6 +55,7 @@ function mergeTimeSeries(datasets: Array<Pick<PlotSeriesData, 'times' | 'values'
 }
 
 export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfig>) {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const plotSeries = config.series
 
@@ -391,7 +393,9 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
         {loadingData && (
           <div className="absolute inset-0 bg-background/50 flex flex-col items-center justify-center z-10 text-muted-foreground select-none">
             <Loader2 className="w-6 h-6 animate-spin text-primary mb-2" />
-            <p className="text-[10px] font-semibold">Extracting optimized datasets...</p>
+            <p className="text-[10px] font-semibold">
+              <FormattedMessage id="panel.plot.extracting" defaultMessage="Extracting optimized datasets..." />
+            </p>
           </div>
         )}
 
@@ -403,7 +407,9 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
                   <div className="bg-popover/90 border border-border/80 text-popover-foreground rounded-md p-2 shadow-lg backdrop-blur-xs max-w-56 flex flex-col gap-1 transition-all duration-200">
                     <div className="flex items-center justify-between gap-3 border-b border-border/40 pb-1 px-0.5 text-muted-foreground font-semibold">
                       <span>
-                        Legend (
+                        <FormattedMessage id="panel.plot.legend" defaultMessage="Legend" />
+                        {' '}
+                        (
                         {activeSeries.length}
                         )
                       </span>
@@ -411,7 +417,7 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
                         type="button"
                         onClick={() => setLegendExpanded(false)}
                         className="p-0.5 hover:bg-muted/80 rounded transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
-                        title="Collapse Legend"
+                        title={intl.formatMessage({ id: 'panel.plot.collapseLegend', defaultMessage: 'Collapse Legend' })}
                       >
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>
@@ -438,7 +444,9 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
                                   toggleSeriesVisibility(s.id)
                                 }}
                                 className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
-                                title={isHidden ? 'Show series' : 'Hide series'}
+                                title={isHidden
+                                  ? intl.formatMessage({ id: 'panel.plot.showSeries', defaultMessage: 'Show series' })
+                                  : intl.formatMessage({ id: 'panel.plot.hideSeries', defaultMessage: 'Hide series' })}
                               >
                                 {isHidden
                                   ? (
@@ -467,15 +475,17 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
                     type="button"
                     onClick={() => setLegendExpanded(true)}
                     className="flex items-center gap-1.5 bg-popover/90 border border-border/80 text-popover-foreground rounded-md px-2 py-1 shadow-md backdrop-blur-xs hover:bg-popover transition-colors cursor-pointer"
-                    title="Expand Legend"
+                    title={intl.formatMessage({ id: 'panel.plot.expandLegend', defaultMessage: 'Expand Legend' })}
                   >
                     <Layers className="w-3 h-3 text-primary" />
-                    <span className="font-semibold text-[10px]">Legend</span>
+                    <span className="font-semibold text-[10px]">
+                      <FormattedMessage id="panel.plot.legend" defaultMessage="Legend" />
+                    </span>
                     {hiddenSeriesIds.size > 0 && (
                       <span className="bg-primary/20 text-primary text-[9px] px-1 rounded font-bold">
                         {hiddenSeriesIds.size}
                         {' '}
-                        hidden
+                        <FormattedMessage id="panel.plot.hidden" defaultMessage="hidden" />
                       </span>
                     )}
                   </button>
@@ -486,18 +496,28 @@ export default function PlotPanel({ config }: PanelComponentProps<PlotPanelConfi
         {plotSeries.length === 0
           ? (
               <div className="text-center text-muted-foreground p-8">
-                <p className="text-xs font-semibold">No Series Configured</p>
+                <p className="text-xs font-semibold">
+                  <FormattedMessage id="panel.plot.noSeries" defaultMessage="No Series Configured" />
+                </p>
                 <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                  Please add and configure a plot series in the left Settings tab to start visualization.
+                  <FormattedMessage
+                    id="panel.plot.noSeriesDesc"
+                    defaultMessage="Please add and configure a plot series in the left Settings tab to start visualization."
+                  />
                 </p>
               </div>
             )
           : activeSeries.length === 0
             ? (
                 <div className="text-center text-muted-foreground p-8">
-                  <p className="text-xs font-semibold">Series Incomplete</p>
+                  <p className="text-xs font-semibold">
+                    <FormattedMessage id="panel.plot.seriesIncomplete" defaultMessage="Series Incomplete" />
+                  </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-1 max-w-60 leading-relaxed">
-                    Please specify both topic and value path for your configured series in the left Settings tab to render.
+                    <FormattedMessage
+                      id="panel.plot.seriesIncompleteDesc"
+                      defaultMessage="Please specify both topic and value path for your configured series in the left Settings tab to render."
+                    />
                   </p>
                 </div>
               )

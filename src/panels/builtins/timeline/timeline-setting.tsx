@@ -1,6 +1,7 @@
 import type { PanelSettingsProps, TimelinePanelConfig } from '@/panels/core/types'
 import { Eye, EyeClosed } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -17,6 +18,7 @@ export default function TimelineSetting({
   config,
   updateConfig,
 }: PanelSettingsProps<TimelinePanelConfig>) {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const [searchQuery, setSearchQuery] = useState('')
   const fieldId = useId()
@@ -67,7 +69,10 @@ export default function TimelineSetting({
     <div className="flex min-h-0 flex-1 flex-col bg-background text-foreground">
       <div className="flex-1 overflow-y-auto">
         <SettingGroup
-          title={`Timeline Topics (${selectedTopicSet.size}/${allTopics.length})`}
+          title={intl.formatMessage(
+            { id: 'panel.timeline.topicsCount', defaultMessage: 'Timeline Topics ({selected}/{total})' },
+            { selected: selectedTopicSet.size, total: allTopics.length },
+          )}
           defaultOpen
         >
           <div className="space-y-2.5">
@@ -76,7 +81,7 @@ export default function TimelineSetting({
                 id={`${fieldId}-search`}
                 value={searchQuery}
                 onChange={event => setSearchQuery(event.target.value)}
-                placeholder="Filter topics…"
+                placeholder={intl.formatMessage({ id: 'panel.timeline.filterTopics', defaultMessage: 'Filter topics…' })}
               />
             </div>
 
@@ -87,7 +92,7 @@ export default function TimelineSetting({
                 size="xs"
                 onClick={() => updateConfig({ visibleTopics: null })}
               >
-                Show all
+                <FormattedMessage id="panel.timeline.showAll" defaultMessage="Show all" />
               </Button>
               <Button
                 type="button"
@@ -95,7 +100,7 @@ export default function TimelineSetting({
                 size="xs"
                 onClick={() => updateConfig({ visibleTopics: [] })}
               >
-                Hide all
+                <FormattedMessage id="panel.timeline.hideAll" defaultMessage="Hide all" />
               </Button>
             </div>
 
@@ -119,7 +124,9 @@ export default function TimelineSetting({
                           toggleTopic(option.topic, !isVisible)
                         }}
                         className="p-0.5 shrink-0 text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
-                        title={isVisible ? 'Hide topic' : 'Show topic'}
+                        title={isVisible
+                          ? intl.formatMessage({ id: 'panel.timeline.hideTopic', defaultMessage: 'Hide topic' })
+                          : intl.formatMessage({ id: 'panel.timeline.showTopic', defaultMessage: 'Show topic' })}
                       >
                         {isVisible
                           ? (

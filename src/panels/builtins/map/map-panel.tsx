@@ -3,6 +3,7 @@ import type { MapPanelConfig, PanelComponentProps } from '@/panels/core/types'
 import { Compass, LocateFixed, Maximize2, Minus, Navigation, Plus } from 'lucide-react'
 import { Map as MapLibreMapConstructor, ScaleControl } from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
 import { subscribePlaybackTime } from '@/core/playback-time-store'
 import { scheduleFrame } from '@/core/raf-scheduler'
@@ -25,6 +26,7 @@ function formatCoordinate(value: number | undefined, positive: string, negative:
 }
 
 export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig>) {
+  const intl = useIntl()
   const fileSummary = usePlayerStore(state => state.fileSummary)
   const [config, updateConfig] = usePanelConfig<MapPanelConfig>()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -230,21 +232,27 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
         {mapStatus === 'loading' && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/80 text-muted-foreground backdrop-blur-sm">
             <div className="size-5 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
-            <span className="text-xs">Loading map…</span>
+            <span className="text-xs">
+              <FormattedMessage id="panel.map.loading" defaultMessage="Loading map…" />
+            </span>
           </div>
         )}
         {mapStatus === 'error' && (
           <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-background/90 p-8 text-center text-muted-foreground">
             <Navigation className="size-6 text-destructive" />
-            <span className="text-xs font-semibold text-foreground">Map style unavailable</span>
+            <span className="text-xs font-semibold text-foreground">
+              <FormattedMessage id="panel.map.styleUnavailable" defaultMessage="Map style unavailable" />
+            </span>
             <span className="max-w-md text-[10px] leading-relaxed">{mapError}</span>
-            <span className="text-[10px] text-muted-foreground/70">Set a reachable MapLibre style URL in panel settings.</span>
+            <span className="text-[10px] text-muted-foreground/70">
+              <FormattedMessage id="panel.map.styleUnavailableHint" defaultMessage="Set a reachable MapLibre style URL in panel settings." />
+            </span>
           </div>
         )}
         {canShowMap && !hasData && (
           <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
             <div className="rounded border border-border/70 bg-background/85 px-2.5 py-1.5 text-[10px] text-muted-foreground shadow-sm backdrop-blur-sm">
-              Select a GPS topic and play the MCAP file to display location data.
+              <FormattedMessage id="panel.map.noDataHint" defaultMessage="Select a GPS topic and play the MCAP file to display location data." />
             </div>
           </div>
         )}
@@ -262,8 +270,12 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
                 type="button"
                 variant="outline"
                 size="icon"
-                title={config.followMode === 'follow' ? 'Stop following current position' : 'Follow current position'}
-                aria-label={config.followMode === 'follow' ? 'Stop following current position' : 'Follow current position'}
+                title={config.followMode === 'follow'
+                  ? intl.formatMessage({ id: 'panel.map.stopFollow', defaultMessage: 'Stop following current position' })
+                  : intl.formatMessage({ id: 'panel.map.follow', defaultMessage: 'Follow current position' })}
+                aria-label={config.followMode === 'follow'
+                  ? intl.formatMessage({ id: 'panel.map.stopFollow', defaultMessage: 'Stop following current position' })
+                  : intl.formatMessage({ id: 'panel.map.follow', defaultMessage: 'Follow current position' })}
                 aria-pressed={config.followMode === 'follow'}
                 onClick={toggleFollow}
                 className={cn(
@@ -277,8 +289,8 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
                 type="button"
                 variant="outline"
                 size="icon"
-                title="Fit trajectory"
-                aria-label="Fit trajectory"
+                title={intl.formatMessage({ id: 'panel.map.fitTrajectory', defaultMessage: 'Fit trajectory' })}
+                aria-label={intl.formatMessage({ id: 'panel.map.fitTrajectory', defaultMessage: 'Fit trajectory' })}
                 onClick={fitToData}
                 className="bg-background/90 shadow-sm backdrop-blur-sm"
               >
@@ -291,8 +303,8 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
                 type="button"
                 variant="outline"
                 size="icon"
-                title="Zoom in"
-                aria-label="Zoom in"
+                title={intl.formatMessage({ id: 'panel.map.zoomIn', defaultMessage: 'Zoom in' })}
+                aria-label={intl.formatMessage({ id: 'panel.map.zoomIn', defaultMessage: 'Zoom in' })}
                 onClick={zoomIn}
                 className="bg-background/90 shadow-sm backdrop-blur-sm"
               >
@@ -302,8 +314,8 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
                 type="button"
                 variant="outline"
                 size="icon"
-                title="Zoom out"
-                aria-label="Zoom out"
+                title={intl.formatMessage({ id: 'panel.map.zoomOut', defaultMessage: 'Zoom out' })}
+                aria-label={intl.formatMessage({ id: 'panel.map.zoomOut', defaultMessage: 'Zoom out' })}
                 onClick={zoomOut}
                 className="bg-background/90 shadow-sm backdrop-blur-sm"
               >
@@ -313,8 +325,8 @@ export default function MapPanel({ panelId }: PanelComponentProps<MapPanelConfig
                 type="button"
                 variant="outline"
                 size="icon"
-                title="Reset north-up"
-                aria-label="Reset north-up"
+                title={intl.formatMessage({ id: 'panel.map.resetNorth', defaultMessage: 'Reset north-up' })}
+                aria-label={intl.formatMessage({ id: 'panel.map.resetNorth', defaultMessage: 'Reset north-up' })}
                 onClick={resetNorth}
                 className="bg-background/90 shadow-sm backdrop-blur-sm"
               >

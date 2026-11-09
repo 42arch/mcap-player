@@ -1,5 +1,6 @@
 import type { IDockviewPanelHeaderProps } from 'dockview-react'
 import { useEffect, useState } from 'react'
+import { useIntl } from 'react-intl'
 import { getPanelDefinition } from '@/panels/core/panel-registry'
 import { usePanelStore } from '@/stores/use-panel-store'
 import { getPanelAppearance, PanelTypeIcon } from './panel-appearance'
@@ -8,11 +9,16 @@ export default function PanelTab({
   api,
   params,
 }: IDockviewPanelHeaderProps<{ panelId: string }>) {
+  const intl = useIntl()
   const instance = usePanelStore(state => state.panelsById[params.panelId])
   const [apiTitle, setApiTitle] = useState(api.title)
   const definition = instance && getPanelDefinition(instance.type)
   const appearance = getPanelAppearance(instance?.type ?? '', definition?.title)
-  const title = instance?.title || appearance.shortTitle || apiTitle || 'Panel'
+  const defaultTitle = appearance.shortTitle || apiTitle || 'Panel'
+  const title = instance?.title
+    || (instance?.type
+      ? intl.formatMessage({ id: `panel.${instance.type}.title`, defaultMessage: defaultTitle })
+      : defaultTitle)
 
   useEffect(() => {
     const disposable = api.onDidTitleChange(event => setApiTitle(event.title))

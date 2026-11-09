@@ -1,6 +1,7 @@
 import type { PanelSettingsProps, ThreeDPanelConfig } from '@/panels/core/types'
 import { Eye, EyeClosed } from 'lucide-react'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Button } from '@/components/ui/button'
 import { ColorPicker } from '@/components/ui/color-picker'
 import {
@@ -51,6 +52,7 @@ export default function ThreeDSetting({
   config: threeDSettings,
   updateConfig: updateThreeDSettings,
 }: PanelSettingsProps<ThreeDPanelConfig>) {
+  const intl = useIntl()
   const channels = usePlayerStore(state => state.fileSummary?.channels)
   const sceneAdapters = useRegisteredSceneMessageAdapters()
   const sceneRenderers = useRegisteredSceneRenderers()
@@ -110,7 +112,10 @@ export default function ThreeDSetting({
       <div className="flex-1 overflow-y-auto">
         {/* 3D Layers Group */}
         <SettingGroup
-          title={`3D Layers (${sceneLayers.length})`}
+          title={intl.formatMessage(
+            { id: 'panel.3d.layersCount', defaultMessage: '3D Layers ({count})' },
+            { count: sceneLayers.length },
+          )}
           defaultOpen
           action={
             sceneLayers.length > 0
@@ -119,7 +124,9 @@ export default function ThreeDSetting({
                     variant="ghost"
                     size="icon-xs"
                     onClick={() => setAllTopicsVisible(!isAnyVisible)}
-                    title={isAnyVisible ? 'Hide all layers' : 'Show all layers'}
+                    title={isAnyVisible
+                      ? intl.formatMessage({ id: 'panel.3d.hideAllLayers', defaultMessage: 'Hide all layers' })
+                      : intl.formatMessage({ id: 'panel.3d.showAllLayers', defaultMessage: 'Show all layers' })}
                   >
                     {isAnyVisible ? <Eye className="size-3.5" /> : <EyeClosed className="size-3.5" />}
                   </Button>
@@ -149,21 +156,30 @@ export default function ThreeDSetting({
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => toggleTopic(channel.topic)}
-                        title={isVisible ? 'Hide layer' : 'Show layer'}
+                        title={isVisible
+                          ? intl.formatMessage({ id: 'panel.3d.hideLayer', defaultMessage: 'Hide layer' })
+                          : intl.formatMessage({ id: 'panel.3d.showLayer', defaultMessage: 'Show layer' })}
                       >
                         {isVisible ? <Eye className="size-3.5" /> : <EyeClosed className="size-3.5" />}
                       </Button>
                     </div>
                   )
                 })
-              : <FieldDescription>No supported 3D layers were detected in this MCAP file.</FieldDescription>}
+              : (
+                  <FieldDescription>
+                    <FormattedMessage id="panel.3d.noLayers" defaultMessage="No supported 3D layers were detected in this MCAP file." />
+                  </FieldDescription>
+                )}
           </div>
         </SettingGroup>
 
         {/* Global Point Cloud Settings Group */}
         {pointCloudLayer
           ? (
-              <SettingGroup title="Point Cloud Settings" defaultOpen>
+              <SettingGroup
+                title={intl.formatMessage({ id: 'panel.3d.pointCloudSettings', defaultMessage: 'Point Cloud Settings' })}
+                defaultOpen
+              >
                 <PointCloudSetting
                   adapter={pointCloudLayer.adapter}
                   channel={pointCloudLayer.channel}
@@ -176,12 +192,15 @@ export default function ThreeDSetting({
           : null}
 
         {/* Frame Settings Group */}
-        <SettingGroup title="Frame Settings" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.3d.frameSettings', defaultMessage: 'Frame Settings' })}
+          defaultOpen
+        >
           <FieldGroup>
             <Field>
               <FieldLabel htmlFor={`fixed-frame-${panelId}`} className="flex items-center">
-                Fixed Frame
-                <HelpTooltip content="Use Auto to derive the TF root, or choose any available frame." />
+                <FormattedMessage id="panel.3d.fixedFrame" defaultMessage="Fixed Frame" />
+                <HelpTooltip content={intl.formatMessage({ id: 'panel.3d.fixedFrameTooltip', defaultMessage: 'Use Auto to derive the TF root, or choose any available frame.' })} />
               </FieldLabel>
               <Select value={fixedFrame} onValueChange={value => updateThreeDSettings({ fixedFrame: value })}>
                 <SelectTrigger id={`fixed-frame-${panelId}`} className="w-full">
@@ -200,8 +219,8 @@ export default function ThreeDSetting({
 
             <Field>
               <FieldLabel htmlFor={`display-frame-${panelId}`} className="flex items-center">
-                Display Frame
-                <HelpTooltip content="Camera reference frame. Options are discovered from the active TF tree." />
+                <FormattedMessage id="panel.3d.displayFrame" defaultMessage="Display Frame" />
+                <HelpTooltip content={intl.formatMessage({ id: 'panel.3d.displayFrameTooltip', defaultMessage: 'Camera reference frame. Options are discovered from the active TF tree.' })} />
               </FieldLabel>
               <Select value={displayFrame} onValueChange={value => updateThreeDSettings({ displayFrame: value })}>
                 <SelectTrigger id={`display-frame-${panelId}`} className="w-full">
@@ -219,8 +238,8 @@ export default function ThreeDSetting({
 
             <Field>
               <FieldLabel htmlFor={`follow-mode-${panelId}`} className="flex items-center">
-                Follow Mode
-                <HelpTooltip content="Choose whether the viewport follows pose, heading, position, or remains fixed." />
+                <FormattedMessage id="panel.3d.followMode" defaultMessage="Follow Mode" />
+                <HelpTooltip content={intl.formatMessage({ id: 'panel.3d.followModeTooltip', defaultMessage: 'Choose whether the viewport follows pose, heading, position, or remains fixed.' })} />
               </FieldLabel>
               <Select
                 value={threeDSettings.followMode || 'follow-position'}
@@ -244,10 +263,15 @@ export default function ThreeDSetting({
         </SettingGroup>
 
         {/* Scene Settings Group */}
-        <SettingGroup title="Scene Settings" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.3d.sceneSettings', defaultMessage: 'Scene Settings' })}
+          defaultOpen
+        >
           <FieldGroup>
             <Field>
-              <FieldLabel>Background Color</FieldLabel>
+              <FieldLabel>
+                <FormattedMessage id="panel.3d.bgColor" defaultMessage="Background Color" />
+              </FieldLabel>
               <ColorPicker
                 value={threeDSettings.backgroundColor || '#ffffff'}
                 onChange={value => updateThreeDSettings({ backgroundColor: value })}
@@ -257,12 +281,12 @@ export default function ThreeDSetting({
             <Field orientation="horizontal">
               <FieldContent>
                 <FieldTitle className="flex items-center">
-                  Reference Grid
-                  <HelpTooltip content="Show the scene helper grid independently of Grid topics." />
+                  <FormattedMessage id="panel.3d.refGrid" defaultMessage="Reference Grid" />
+                  <HelpTooltip content={intl.formatMessage({ id: 'panel.3d.refGridTooltip', defaultMessage: 'Show the scene helper grid independently of Grid topics.' })} />
                 </FieldTitle>
               </FieldContent>
               <Switch
-                aria-label="Show reference grid"
+                aria-label={intl.formatMessage({ id: 'panel.3d.refGrid', defaultMessage: 'Reference Grid' })}
                 checked={threeDSettings.showGrid}
                 onCheckedChange={checked => updateThreeDSettings({ showGrid: checked })}
               />
@@ -271,12 +295,12 @@ export default function ThreeDSetting({
             <Field orientation="horizontal">
               <FieldContent>
                 <FieldTitle className="flex items-center">
-                  Origin Axes
-                  <HelpTooltip content="Show coordinate axes at the fixed-frame origin." />
+                  <FormattedMessage id="panel.3d.originAxes" defaultMessage="Origin Axes" />
+                  <HelpTooltip content={intl.formatMessage({ id: 'panel.3d.originAxesTooltip', defaultMessage: 'Show coordinate axes at the fixed-frame origin.' })} />
                 </FieldTitle>
               </FieldContent>
               <Switch
-                aria-label="Show origin axes"
+                aria-label={intl.formatMessage({ id: 'panel.3d.originAxes', defaultMessage: 'Origin Axes' })}
                 checked={threeDSettings.showAxes}
                 onCheckedChange={checked => updateThreeDSettings({ showAxes: checked })}
               />

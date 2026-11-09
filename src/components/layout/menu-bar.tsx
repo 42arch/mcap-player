@@ -56,7 +56,7 @@ export default function MenuBar() {
       return
 
     resetPanels()
-    setIsLoading(true, 'Reading MCAP file...')
+    setIsLoading(true, formatMessage({ id: 'menu.readingMcap', defaultMessage: 'Reading MCAP file...' }))
     captureMcapOpened({
       source: 'menu',
       method: 'local',
@@ -68,7 +68,7 @@ export default function MenuBar() {
     catch (err: any) {
       console.error(err)
       globalPlaybackController.closeFile()
-      setError(err.message || 'Failed to parse MCAP file')
+      setError(err.message || formatMessage({ id: 'menu.parseError', defaultMessage: 'Failed to parse MCAP file' }))
     }
     finally {
       setIsLoading(false)
@@ -96,7 +96,7 @@ export default function MenuBar() {
 
     captureMcapOpened({ source: 'menu', method: 'remote' })
     resetPanels()
-    setIsLoading(true, 'Reading remote MCAP indexes...')
+    setIsLoading(true, formatMessage({ id: 'menu.readingRemote', defaultMessage: 'Reading remote MCAP indexes...' }))
     try {
       await globalPlaybackController.loadRemoteUrl(normalizedUrl)
       setRemoteUrl('')
@@ -104,7 +104,7 @@ export default function MenuBar() {
     catch (err: any) {
       console.error('Failed to load remote MCAP:', err)
       globalPlaybackController.closeFile()
-      setError(err.message || 'Failed to load remote MCAP file')
+      setError(err.message || formatMessage({ id: 'menu.loadRemoteError', defaultMessage: 'Failed to load remote MCAP file' }))
     }
   }
 
@@ -113,7 +113,7 @@ export default function MenuBar() {
     const exportData = buildExportData(panelsById, panelOrder, dockviewApi)
     const dateStr = new Date().toISOString().slice(0, 10)
     downloadJsonFile(exportData, `mcapview-layout-${dateStr}.json`)
-    toast.success('Layout configuration exported successfully')
+    toast.success(formatMessage({ id: 'menu.exportSuccess', defaultMessage: 'Layout configuration exported successfully' }))
   }
 
   const handleImportLayoutClick = () => {
@@ -135,11 +135,11 @@ export default function MenuBar() {
       if (dockviewApi && configData.dockviewLayout) {
         dockviewApi.fromJSON(configData.dockviewLayout as any)
       }
-      toast.success('Layout configuration imported successfully')
+      toast.success(formatMessage({ id: 'menu.importSuccess', defaultMessage: 'Layout configuration imported successfully' }))
     }
     catch (err: any) {
       console.error('Failed to import layout:', err)
-      toast.error(err.message || 'Failed to import layout configuration')
+      toast.error(err.message || formatMessage({ id: 'menu.importError', defaultMessage: 'Failed to import layout configuration' }))
     }
     finally {
       if (layoutInputRef.current) {

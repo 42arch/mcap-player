@@ -46,6 +46,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    dedupe: ['react', 'react-dom'],
   },
   // @mcap/support loads Emscripten modules whose CommonJS glue calls require()
   // for WASM files. Keep Vite's dependency optimizer from wrapping those files

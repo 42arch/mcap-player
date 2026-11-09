@@ -5,6 +5,7 @@ import type { PanelComponentProps, TimelinePanelConfig } from '@/panels/core/typ
 import { ChartNoAxesGantt, TriangleAlert } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormattedMessage, useIntl } from 'react-intl'
 import UPlotChart from '@/components/common/uplot-chart'
 import {
   Empty,
@@ -82,16 +83,17 @@ function TimelineEmptyState({
   error: string | null
   hasSelection: boolean
 }) {
+  const intl = useIntl()
   const Icon = error ? TriangleAlert : ChartNoAxesGantt
   const title = error
-    ? 'Timeline unavailable'
+    ? intl.formatMessage({ id: 'panel.timeline.unavailable', defaultMessage: 'Timeline unavailable' })
     : hasSelection
-      ? 'No messages found'
-      : 'No topics selected'
+      ? intl.formatMessage({ id: 'panel.timeline.noMessages', defaultMessage: 'No messages found' })
+      : intl.formatMessage({ id: 'panel.timeline.noTopics', defaultMessage: 'No topics selected' })
   const description = error
     ?? (hasSelection
-      ? 'The selected topics do not contain any messages.'
-      : 'Select one or more topics from the panel settings.')
+      ? intl.formatMessage({ id: 'panel.timeline.noMessagesDesc', defaultMessage: 'The selected topics do not contain any messages.' })
+      : intl.formatMessage({ id: 'panel.timeline.noTopicsDesc', defaultMessage: 'Select one or more topics from the panel settings.' }))
 
   return (
     <Empty>
@@ -447,13 +449,14 @@ export default function TimelinePanel({
         {timelineData && visibleTimelineData.length > 0 && !showEmptyState && (
           <div className="absolute top-3 right-3 z-20 pointer-events-none select-none font-mono text-[10px]">
             <div className="bg-popover/90 border border-border/80 text-muted-foreground px-2 py-1 rounded-md shadow-xs backdrop-blur-xs">
-              {visibleTimelineData.length}
-              {' '}
-              topics ·
-              {' '}
-              {visibleMessageCount.toLocaleString()}
-              {' '}
-              messages
+              <FormattedMessage
+                id="panel.timeline.summary"
+                defaultMessage="{topics} topics · {messages} messages"
+                values={{
+                  topics: visibleTimelineData.length,
+                  messages: visibleMessageCount.toLocaleString(),
+                }}
+              />
             </div>
           </div>
         )}
@@ -462,7 +465,9 @@ export default function TimelinePanel({
           ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Spinner />
-                <span className="text-xs">Indexing message timestamps…</span>
+                <span className="text-xs">
+                  <FormattedMessage id="panel.timeline.indexing" defaultMessage="Indexing message timestamps…" />
+                </span>
               </div>
             )
           : showEmptyState
@@ -495,15 +500,21 @@ export default function TimelinePanel({
                         className="mb-1 max-w-72 truncate border-b border-border pb-1 font-semibold"
                       />
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-muted-foreground">Relative</span>
+                        <span className="text-muted-foreground">
+                          <FormattedMessage id="panel.timeline.relative" defaultMessage="Relative" />
+                        </span>
                         <span ref={tooltipRelativeTimeRef} />
                       </div>
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-muted-foreground">Log time</span>
+                        <span className="text-muted-foreground">
+                          <FormattedMessage id="panel.timeline.logTime" defaultMessage="Log time" />
+                        </span>
                         <span ref={tooltipAbsoluteTimeRef} />
                       </div>
                       <div className="flex items-center justify-between gap-4">
-                        <span className="text-muted-foreground">Messages in bucket</span>
+                        <span className="text-muted-foreground">
+                          <FormattedMessage id="panel.timeline.bucketCount" defaultMessage="Messages in bucket" />
+                        </span>
                         <span ref={tooltipBucketCountRef} />
                       </div>
                     </div>

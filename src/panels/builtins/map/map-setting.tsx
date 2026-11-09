@@ -1,4 +1,5 @@
 import type { MapPanelConfig, PanelSettingsProps } from '@/panels/core/types'
+import { FormattedMessage, useIntl } from 'react-intl'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -8,6 +9,7 @@ import { isLocationChannel } from './map-adapters'
 import { DEFAULT_OSM_STYLE_URL } from './map-style'
 
 export default function MapSetting({ panelId, config, updateConfig }: PanelSettingsProps<MapPanelConfig>) {
+  const intl = useIntl()
   const channels = usePlayerStore(state => state.fileSummary?.channels || [])
   const locationTopics = channels.filter(isLocationChannel)
   const activePositionTopic = config.positionTopic && locationTopics.some(channel => channel.topic === config.positionTopic)
@@ -25,11 +27,14 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-background text-foreground">
       <div className="flex-1 overflow-y-auto">
-        <SettingGroup title="Position" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.map.position', defaultMessage: 'Position' })}
+          defaultOpen
+        >
           <div className="flex flex-col gap-2">
             <label htmlFor={positionTopicId} className="flex items-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              Position topic
-              <HelpTooltip content="Select the GPS or location topic used for the current position and trajectory." />
+              <FormattedMessage id="panel.map.positionTopic" defaultMessage="Position topic" />
+              <HelpTooltip content={intl.formatMessage({ id: 'panel.map.positionTopicTooltip', defaultMessage: 'Select the GPS or location topic used for the current position and trajectory.' })} />
             </label>
             <Select
               value={activePositionTopic}
@@ -37,7 +42,10 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
               disabled={locationTopics.length === 0}
             >
               <SelectTrigger id={positionTopicId} className="h-8 w-full bg-background font-mono text-[11px]">
-                <SelectValue placeholder={locationTopics.length === 0 ? 'No compatible position topics' : 'Select a position topic'} />
+                <SelectValue placeholder={locationTopics.length === 0
+                  ? intl.formatMessage({ id: 'panel.map.noLocationTopics', defaultMessage: 'No compatible position topics' })
+                  : intl.formatMessage({ id: 'panel.map.selectLocationTopic', defaultMessage: 'Select a position topic' })}
+                />
               </SelectTrigger>
               <SelectContent position="popper" className="bg-popover text-popover-foreground">
                 <SelectGroup>
@@ -52,11 +60,14 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
           </div>
         </SettingGroup>
 
-        <SettingGroup title="Map Style" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.map.mapStyle', defaultMessage: 'Map Style' })}
+          defaultOpen
+        >
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center">
-              Style source
-              <HelpTooltip content="Use osm://default for OpenStreetMap XYZ tiles, or enter a custom MapLibre Style JSON URL." />
+              <FormattedMessage id="panel.map.styleSource" defaultMessage="Style source" />
+              <HelpTooltip content={intl.formatMessage({ id: 'panel.map.styleSourceTooltip', defaultMessage: 'Use osm://default for OpenStreetMap XYZ tiles, or enter a custom MapLibre Style JSON URL.' })} />
             </label>
             <input
               value={config.styleUrl}
@@ -67,22 +78,43 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
           </div>
         </SettingGroup>
 
-        <SettingGroup title="History" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.map.history', defaultMessage: 'History' })}
+          defaultOpen
+        >
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Time Range</label>
+            <label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+              <FormattedMessage id="panel.map.timeRange" defaultMessage="Time Range" />
+            </label>
             <Select
               value={config.historyMode}
               onValueChange={value => updateConfig({ historyMode: value as MapPanelConfig['historyMode'] })}
             >
               <SelectTrigger className="h-8 w-full bg-background text-[11px]">
-                <span>{config.historyMode === 'all-previous' ? 'All previous' : config.historyMode === 'last-n-seconds' ? 'Last N seconds' : config.historyMode === 'latest' ? 'Latest' : 'All'}</span>
+                <span>
+                  {config.historyMode === 'all-previous'
+                    ? intl.formatMessage({ id: 'panel.map.historyAllPrevious', defaultMessage: 'All previous' })
+                    : config.historyMode === 'last-n-seconds'
+                      ? intl.formatMessage({ id: 'panel.map.historyLastNSeconds', defaultMessage: 'Last N seconds' })
+                      : config.historyMode === 'latest'
+                        ? intl.formatMessage({ id: 'panel.map.historyLatest', defaultMessage: 'Latest' })
+                        : intl.formatMessage({ id: 'panel.map.historyAll', defaultMessage: 'All' })}
+                </span>
               </SelectTrigger>
               <SelectContent position="popper" className="bg-popover text-popover-foreground">
                 <SelectGroup>
-                  <SelectItem value="latest" className="text-[11px]">Latest</SelectItem>
-                  <SelectItem value="all-previous" className="text-[11px]">All previous</SelectItem>
-                  <SelectItem value="last-n-seconds" className="text-[11px]">Last N seconds</SelectItem>
-                  <SelectItem value="all" className="text-[11px]">All</SelectItem>
+                  <SelectItem value="latest" className="text-[11px]">
+                    <FormattedMessage id="panel.map.historyLatest" defaultMessage="Latest" />
+                  </SelectItem>
+                  <SelectItem value="all-previous" className="text-[11px]">
+                    <FormattedMessage id="panel.map.historyAllPrevious" defaultMessage="All previous" />
+                  </SelectItem>
+                  <SelectItem value="last-n-seconds" className="text-[11px]">
+                    <FormattedMessage id="panel.map.historyLastNSeconds" defaultMessage="Last N seconds" />
+                  </SelectItem>
+                  <SelectItem value="all" className="text-[11px]">
+                    <FormattedMessage id="panel.map.historyAll" defaultMessage="All" />
+                  </SelectItem>
                 </SelectGroup>
               </SelectContent>
             </Select>
@@ -107,11 +139,16 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
           </div>
         </SettingGroup>
 
-        <SettingGroup title="Location Point" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.map.locationPoint', defaultMessage: 'Location Point' })}
+          defaultOpen
+        >
           <div className="space-y-3">
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                <span>Point size</span>
+                <span>
+                  <FormattedMessage id="panel.map.pointSize" defaultMessage="Point size" />
+                </span>
                 <span className="font-mono text-primary">
                   {config.pointSize}
                   px
@@ -127,24 +164,29 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
             </div>
             <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
               <input type="checkbox" checked={config.showHeading} onChange={event => updateConfig({ showHeading: event.target.checked })} />
-              Show heading
+              <FormattedMessage id="panel.map.showHeading" defaultMessage="Show heading" />
             </label>
             <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
               <input type="checkbox" checked={config.showVelocity} onChange={event => updateConfig({ showVelocity: event.target.checked })} />
-              Show velocity
+              <FormattedMessage id="panel.map.showVelocity" defaultMessage="Show velocity" />
             </label>
             <label className="flex items-center gap-2 text-[10px] text-muted-foreground">
               <input type="checkbox" checked={config.followMode === 'follow'} onChange={event => updateConfig({ followMode: event.target.checked ? 'follow' : 'free' })} />
-              Follow current position
+              <FormattedMessage id="panel.map.followCurrent" defaultMessage="Follow current position" />
             </label>
           </div>
         </SettingGroup>
 
-        <SettingGroup title="Track" defaultOpen>
+        <SettingGroup
+          title={intl.formatMessage({ id: 'panel.map.track', defaultMessage: 'Track' })}
+          defaultOpen
+        >
           <div className="space-y-3">
             <div className="space-y-1">
               <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                <span>Line width</span>
+                <span>
+                  <FormattedMessage id="panel.map.lineWidth" defaultMessage="Line width" />
+                </span>
                 <span className="font-mono text-primary">
                   {config.trackWidth}
                   px
@@ -159,14 +201,19 @@ export default function MapSetting({ panelId, config, updateConfig }: PanelSetti
               />
             </div>
             <div className="flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
-              <span>Track color</span>
+              <span>
+                <FormattedMessage id="panel.map.trackColor" defaultMessage="Track color" />
+              </span>
               <input type="color" value={config.trackColor} onChange={event => updateConfig({ trackColor: event.target.value })} className="size-6 cursor-pointer rounded border border-border bg-transparent" />
             </div>
           </div>
         </SettingGroup>
 
         {geoJsonTopics.length > 0 && (
-          <SettingGroup title="GeoJSON Topics" defaultOpen>
+          <SettingGroup
+            title={intl.formatMessage({ id: 'panel.map.geoJsonTopics', defaultMessage: 'GeoJSON Topics' })}
+            defaultOpen
+          >
             <div className="space-y-2">
               {geoJsonTopics.map((channel) => {
                 const enabled = config.visibleGeoJsonTopics[channel.topic] !== false

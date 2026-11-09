@@ -15,6 +15,7 @@ interface PanelState {
   dockviewApi: DockviewApi | null
 
   addPanel: (type: PanelType, initialConfig?: Partial<PanelConfig>) => PanelId
+  addPanels: (specs: Array<{ type: PanelType, initialConfig?: Partial<PanelConfig> }>) => PanelId[]
   removePanel: (panelId: PanelId) => void
   updatePanelConfig: (panelId: PanelId, patch: Partial<PanelConfig>) => void
   setActivePanel: (panelId: PanelId | null) => void
@@ -55,6 +56,39 @@ export const usePanelStore = create<PanelState>((set, get) => ({
     }))
     assignDefaultPanelTopics()
     return id
+  },
+
+  addPanels: (specs) => {
+    const newPanels: Record<PanelId, PanelInstance> = {}
+    const newIds: PanelId[] = []
+
+    for (const spec of specs) {
+      const definition = getPanelDefinition(spec.type)
+      if (!definition) {
+        continue
+      }
+      const id = `${spec.type}-${nanoid(8)}`
+      newPanels[id] = {
+        id,
+        type: spec.type,
+        configVersion: definition.configVersion,
+        config: { ...definition.createDefaultConfig(), ...spec.initialConfig },
+      }
+      newIds.push(id)
+    }
+
+    if (newIds.length === 0) {
+      return []
+    }
+
+    set(state => ({
+      panelsById: { ...state.panelsById, ...newPanels },
+      panelOrder: [...state.panelOrder, ...newIds],
+      activePanelId: state.activePanelId ?? newIds[0],
+      selectedPanelId: state.selectedPanelId ?? newIds[0],
+    }))
+    assignDefaultPanelTopics()
+    return newIds
   },
 
   removePanel: (panelId) => {
