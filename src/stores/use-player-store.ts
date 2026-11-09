@@ -1,5 +1,6 @@
 import type { RemoteLoadProgress } from '@/core/sources/remote-load-progress'
 import { create } from 'zustand'
+import { assignDefaultPanelTopics } from '@/panels/core/assign-default-topics'
 
 export interface McapHeader {
   profile?: string
@@ -147,7 +148,7 @@ export const usePlayerStore = create<PlayerStore>(set => ({
 
   selectedTopic: null,
 
-  setFileSummary: summary =>
+  setFileSummary: (summary) => {
     set({
       fileSummary: summary,
       isLoading: false,
@@ -156,7 +157,9 @@ export const usePlayerStore = create<PlayerStore>(set => ({
       isPlaying: false,
       selectedTopic: null,
       isRemoteFullDownloadRunning: false,
-    }),
+    })
+    assignDefaultPanelTopics()
+  },
   setIsLoading: (loading, message = '') =>
     set({ isLoading: loading, loadingMessage: message }),
   setError: error => set({ error, isLoading: false }),

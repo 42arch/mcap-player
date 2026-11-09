@@ -3,6 +3,7 @@ import type { PanelConfig, PanelId, PanelInstance, PanelType } from '@/panels/co
 import { nanoid } from 'nanoid'
 import { create } from 'zustand'
 
+import { assignDefaultPanelTopics } from '@/panels/core/assign-default-topics'
 import { getPanelDefinition } from '@/panels/core/panel-registry'
 
 interface PanelState {
@@ -52,6 +53,7 @@ export const usePanelStore = create<PanelState>((set, get) => ({
       activePanelId: id,
       selectedPanelId: id,
     }))
+    assignDefaultPanelTopics()
     return id
   },
 
@@ -112,5 +114,6 @@ export const usePanelStore = create<PanelState>((set, get) => ({
       activePanelId: firstId,
       selectedPanelId: firstId,
     })
+    assignDefaultPanelTopics()
   },
 }))

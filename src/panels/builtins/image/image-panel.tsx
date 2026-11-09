@@ -11,6 +11,7 @@ import { isH264Format, processH264Frame } from '@/core/parsers/h264'
 import { scheduleFrame } from '@/core/raf-scheduler'
 import { cn } from '@/lib/utils'
 import { PanelContentHeader } from '@/panels/builtins/panel-content-header'
+import { isSelectableImageChannel } from '@/panels/core/default-topic'
 import { usePanelConfig } from '@/panels/core/panel-context'
 import { globalMessagePipeline } from '@/panels/runtime/message-pipeline'
 import { usePlayerStore } from '@/stores/use-player-store'
@@ -323,12 +324,7 @@ export default function ImagePanel({ panelId }: PanelComponentProps<ImagePanelCo
   const activeTopic = config.topic
 
   const channels = fileSummary?.channels || []
-  const imageChannels = channels.filter((ch) => {
-    if (!ch.schemaName)
-      return false
-    const lower = ch.schemaName.toLowerCase()
-    return lower.includes('image') || lower.includes('video') || lower.includes('compressed')
-  })
+  const imageChannels = channels.filter(isSelectableImageChannel)
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0 bg-card overflow-hidden">
